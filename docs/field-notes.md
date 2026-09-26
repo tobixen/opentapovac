@@ -141,6 +141,23 @@ Everything was read back and compared afterwards.
   (`getCleanRecords`, `notify_event` 20).  `getPathData` held only 14
   points (the last stretch to the dock): the track had been cleared.
   Afterwards the base lost power again (standby, battery falling).
+* 2026-09-26 22:18: outer hall, hall, kjøkken, vacuum then mop (daemon,
+  job 5615467a; the first run with the track recorded all the way).  **No
+  vacuum pass**: 22:18–22:20 it drove to the outer hall, made a short loop
+  and went straight home to fit the mop, then mopped the outer hall and
+  hall.  Not a resume of the abandoned 20:35 task: it never went into the
+  boys room.  Heading home at 22:32:50 it started relocating in the same
+  poll and went **into the living room** instead of the kitchen; carried
+  home.  After a mop wash it set off for the outer hall again (its
+  `goto_point`) but through the living room (it knew it was there:
+  `real_vac_coor` inside room 2), then lost to the **kitchen doorstep**
+  (kitchen side, `clean_percent` stuck at 45 for minutes); carried over
+  twice, after one carry it still reported the kitchen.  After another
+  wash it mopped the kitchen (66 % at 22:59) and headed home at 23:03.
+  Open question: firmware path planning or mislocalization after
+  relocations and carries?  Every detour tonight began with a relocation.
+  New reads: `getCleanInfo` (percent, minutes, m²), `getMopState`; the
+  app's `gotoPoint {"switch", "point"}` found, not sent (protocol.md).
 
 ## Next steps
 

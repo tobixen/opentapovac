@@ -35,3 +35,27 @@
   `opentapovac log` (without `-f`) shows nothing and the standalone
   fallback tracebacks on the credentials.  Document, or give the service a
   fixed group an admin can join.
+
+## From the 2026-09-26 evening runs (field-notes.md)
+
+* **Planner or position?**  Log `real_vac_coor` with the progress line and
+  compare with what a human sees: a wrong position means mislocalization
+  (relocation watchdog, design.md §4, gets priority); a right position and
+  a wrong route means the firmware planner.
+* **Skipped vacuum pass** (22:18): find out why.  Try `support_continue:
+  false`, or a stop before the run, and see if it vacuums.  But the mop
+  state is only read once a minute, so a vacuum pass shorter than that is
+  missed and reported as skipped: read `getMopState` on every poll while
+  cleaning first.
+* **The kitchen doorstep** is lost in both directions: check for
+  obstacles, or a ramp; a no-go line in front of the living room keeps the
+  planner out of it when the living room is not in the run.  The
+  `no_progress` warning resets on any status but cleaning, so a robot
+  flipping between cleaning and relocating there never trips it: check the
+  22:47 log, and count any active status as working if so.
+* **Progress line tests:** nothing covers `getCleanInfo`, `getMopState` or
+  the battery failing during a probe, or `vacuum_first` passed on from a
+  vacuum-then-mop run; `test_progress_logged_every_minute` pins exactly 3
+  lines to the fake clock.
+* **`gotoPoint`** (from the app, not sent): test with someone watching,
+  kitchen spot then the hall; then waypoints (milestone 5).
