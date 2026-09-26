@@ -143,4 +143,3 @@ costs:
 4. WireGuard on the router, laptop as peer; test from outside.
 5. Read the egress log for a while to see what the robot talks to, then
    try a day with `insecure_egress` off.
-

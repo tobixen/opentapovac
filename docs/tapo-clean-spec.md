@@ -43,7 +43,7 @@ I will have to let my family use this, and they may not want to use the cli.  Is
 The project should be open-sourced - meaning that the "specifics for our home" mostly should land in a config file - but it's also possible to split it into an open-source general python package and make the web-system and local logic in a separate package.  Though, "we have some rooms where it's needed to carry the robot" and "robot got stuck while trying to return to base" are most likely not unique things with our home.
 
 The project can run either externally, on one of my servers (an Ubuntu box managed by puppet, or a NixOS box).  There is a complication since the OpenWRT router even has dynamic IPv6 - from time to time the ISP decides to rotate it.  We'd probably also need some kind of authentication.  Wireguard was already on the table.  Ideally I'd have it run on a local computer, but it does not seem like I will be able to set up something here and now.  Perhaps it can run from a family member's server.  In any case, the development and testing can be done from this laptop.
-  
+
 ## Decisions already made
 
 * Python, calling the python-kasa **library** directly.  Don't shell out to
