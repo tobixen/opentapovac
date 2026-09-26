@@ -4,6 +4,7 @@ import pytest
 
 from opentapovac.engine import AnswerError, Busy, Engine, JobRequest, PlanError
 from opentapovac.payloads import STOP
+from opentapovac.robot import RobotError
 from opentapovac.rooms import RoomTable
 from opentapovac.tracks import Track
 from tests.conftest import FakeClock, FakeRobot, make_map, record, vac
@@ -341,3 +342,92 @@ async def test_watch_leaves_jobs_alone(config, events):
     await engine.watch_step()
     assert len(robot.path_calls) == calls
     await engine.stop()
+
+
+class Flaky(FakeRobot):
+    """Fails the named method the first `n` times."""
+
+    def __init__(self, *a, flaky=None, **kw):
+        super().__init__(*a, **kw)
+        self.flaky = dict(flaky or {})
+
+    async def _raw(self, method, params):
+        if self.flaky.get(method, 0) > 0:
+            self.flaky[method] -= 1
+            raise RobotError(f"{method} timed out")
+        return await super()._raw(method, params)
+
+
+async def test_lost_poll_while_waiting_for_idle_is_not_fatal(config, events):
+    robot = Flaky(A_RUN, flaky={"getVacStatus": 1})
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "done", job.message
+
+
+async def test_long_loss_of_contact_alerts(config, events):
+    config.idle_timeout = 100  # also the "no contact" alert threshold
+    robot = Flaky([16, 1, 1, 4, 16], flaky={})
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.submit(JobRequest(rooms=["kitchen"]))
+    await until(lambda: robot.sent)
+    robot.flaky["getVacStatus"] = 8  # 8 polls x 20 s
+    await engine.wait()
+    assert job.state == "done", job.message
+    assert [r["level"] for r in events.recent() if r["code"] == "no_contact"] == ["alert"]
+
+
+async def test_position_check_failure_is_a_warning(config, events):
+    robot = Flaky([16, 1])
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await carry_in_job(engine, robot)
+    robot.flaky["getMapData"] = 1
+    engine.answer(job.id, "done")
+    robot.statuses = [vac(1)] * 5 + [vac(4), vac(16)]
+    await engine.wait()
+    assert job.state == "done", job.message
+    assert "position_unknown" in [r["code"] for r in events.recent()]
+
+
+async def test_broken_track_reply_does_not_end_the_job(config, events):
+    class OddPath(FakeRobot):
+        async def _raw(self, method, params):
+            if method == "getPathData":
+                return {"path_id": 1, "point_counts": 3}  # no pos_array
+            return await super()._raw(method, params)
+
+    engine, _ = make_engine(config, events, OddPath(A_RUN))
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "done", job.message
+    assert "track_failed" in [r["code"] for r in events.recent()]
+
+
+async def test_concurrent_submits_start_one_job(config, events):
+    class Slow(FakeRobot):
+        async def _raw(self, method, params):
+            await asyncio.sleep(0)  # a real query yields
+            return await super()._raw(method, params)
+
+    engine, _ = make_engine(config, events, Slow([16, 1]), rooms=False)
+    results = await asyncio.gather(
+        engine.submit(JobRequest(rooms=["kitchen"])),
+        engine.submit(JobRequest(rooms=["kitchen"])),
+        return_exceptions=True,
+    )
+    assert sorted(type(r).__name__ for r in results) == ["Busy", "Job"]
+    await engine.stop()
+
+
+async def test_watcher_backs_off_when_a_job_starts_meanwhile(config, events):
+    robot = FakeRobot([1])
+    robot.path = (7, [(1, 0), (100, 100)])
+    engine, _ = make_engine(config, events, robot)
+    real = robot.vac_status
+
+    async def slow_vac_status():
+        engine.job = type("J", (), {"active": True, "id": "x", "state": "running"})()
+        return await real()
+
+    robot.vac_status = slow_vac_status
+    await engine.watch_step()
+    assert robot.path_calls == []

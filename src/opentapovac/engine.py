@@ -107,6 +107,7 @@ class Engine:
         self._track_failed = False
         #: the watcher follows the robot outside jobs
         self._watching = False
+        self._submit_lock = asyncio.Lock()
         self.params = MonitorParams(config.start_timeout, config.settle, config.gave_up_after, config.verify_after)
 
     # --- planning ---
@@ -131,15 +132,16 @@ class Engine:
 
     async def submit(self, req: JobRequest) -> Job:
         """Plan and start a job in the background.  Raises PlanError, Busy."""
-        if self.busy:
-            raise Busy(f"job {self.job.id} is still {self.job.state}")
-        if not len(self.rooms):
-            await self.refresh_rooms()
-        warnings: list[str] = []
-        job = Job(req, self.plan(req, warnings), warnings=warnings)
-        self.job = self.jobs[job.id] = job
-        self._task = asyncio.create_task(self._run(job))
-        return job
+        async with self._submit_lock:  # the room refresh awaits; two submits must not both pass
+            if self.busy:
+                raise Busy(f"job {self.job.id} is still {self.job.state}")
+            if not len(self.rooms):
+                await self.refresh_rooms()
+            warnings: list[str] = []
+            job = Job(req, self.plan(req, warnings), warnings=warnings)
+            self.job = self.jobs[job.id] = job
+            self._task = asyncio.create_task(self._run(job))
+            return job
 
     async def wait(self) -> Job | None:
         if self._task is not None:
@@ -195,7 +197,7 @@ class Engine:
             return
         try:
             await self.track.poll(self.robot)
-        except RobotError as e:
+        except Exception as e:  # noqa: BLE001 — bookkeeping on a reverse-engineered reply must not end a job
             if not self._track_failed:  # once per track
                 self._track_failed = True
                 self._emit("warn", f"could not fetch the track: {e}", "track_failed", job)
@@ -203,7 +205,7 @@ class Engine:
     async def _fetch_records(self, job: Job | None, report: bool = True) -> None:
         try:
             new = await self.records.fetch(self.robot)
-        except RobotError as e:
+        except Exception as e:  # noqa: BLE001 — as in _poll_track
             _LOGGER.debug("getCleanRecords: %s", e)
             return
         for r in new if report else []:
@@ -214,6 +216,8 @@ class Engine:
         if self.busy:
             return
         vac = await self.robot.vac_status()
+        if self.busy:  # a job started while we asked
+            return
         status, errors = vac.get("status"), vac.get("err_status") or []
         active = status not in (5, 6, 8, 16) and not (status == 0 and not errors)
         if active and not self._watching:
@@ -266,9 +270,13 @@ class Engine:
 
     async def _verify_position(self, job: Job, room: Room) -> None:
         """After a carry-in: is the robot where it was put?  Wrong = stop, before it cleans by a wrong map."""
-        md = await self.robot.map_data()
-        xy = (md.get("real_vac_coor") or [0, 0])[:2]
-        near = mapimg.rooms_near(md, xy) if any(xy) else set()
+        try:
+            md = await self.robot.map_data()
+            xy = (md.get("real_vac_coor") or [0, 0])[:2]
+            near = mapimg.rooms_near(md, xy) if any(xy) else set()
+        except (RobotError, KeyError, TypeError, ValueError) as e:
+            self._emit("warn", f"could not check the position ({e}); is it in {room.label}?", "position_unknown", job)
+            return
         if room.id in near:
             self._emit("info", f"position checked: in {room.label}", "position_ok", job)
             return
@@ -316,7 +324,15 @@ class Engine:
         deadline = self.clock() + self.config.idle_timeout
         told = False
         while True:
-            o = await self._observe()
+            try:
+                o = await self._observe()
+            except RobotError as e:
+                # a lost poll is not a lost job; the deadline still holds
+                if self.clock() > deadline:
+                    raise
+                self._emit("warn", f"poll failed: {e}", "poll_failed", job)
+                await self.sleep(self.config.poll_interval)
+                continue
             if watch.feed(o):
                 if watch.standby:
                     self._emit("warn", "robot is in standby, not charging — is the base powered?", "standby", job)
@@ -339,6 +355,8 @@ class Engine:
         m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out)
         posed: Ask | None = None
         posed_at, told = 0.0, False
+        lost_since: float | None = None
+        lost_told = False
         try:
             while True:
                 await self.sleep(self.config.poll_interval)
@@ -354,9 +372,17 @@ class Engine:
                 try:
                     o = await self._observe()
                 except RobotError as e:
-                    # a lost poll is not a lost run; keep watching
+                    # a lost poll is not a lost run; keep watching, but say so when it lasts
                     self._emit("warn", f"poll failed: {e}", "poll_failed", job)
+                    lost_since = self.clock() if lost_since is None else lost_since
+                    if not lost_told and self.clock() - lost_since > self.config.idle_timeout:
+                        lost_told = True
+                        mins = (self.clock() - lost_since) / 60
+                        self._emit("alert", f"no contact with the robot for {mins:.0f} min", "no_contact", job)
                     continue
+                if lost_told:
+                    self._emit("info", "contact with the robot is back", "contact", job)
+                lost_since, lost_told = None, False
                 for ev in m.step(o):
                     self._emit(ev.level, ev.msg, ev.code, job)
                 await self._poll_track(job)
