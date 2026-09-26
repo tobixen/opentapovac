@@ -129,8 +129,8 @@ Everything was read back and compared afterwards.
   sat in standby with err 4.  `setRobotPause` false, and true/false, had
   no effect (protocol.md); the button then sent it home.  The first try
   failed before sending anything: python-kasa's TPAP handshake breaks when
-  gmpy2 is installed (fixed on our branch, d7d4ed5; upstream
-  <https://github.com/ZeliardM/python-kasa/pull/7>).
+  gmpy2 is installed (fixed on our branch, 6ed51c7, originally d7d4ed5;
+  upstream <https://github.com/ZeliardM/python-kasa/pull/7>).
 * 2026-09-26 20:35: boys room, outer hall, hall, kjøkken, vacuum then
   mop, one run (`opentapovac clean --vac-then-mop … --wait`, via the
   daemon).  Vacuum 20:35–20:45, mops fitted and washed, mop pass

@@ -22,8 +22,8 @@ let
     src = fetchFromGitHub {
       owner = "tobixen";
       repo = "python-kasa";
-      rev = "d7d4ed5b06340b774246087848e92ba5e5aac1e4"; # tpap-rv50-tls-fix
-      hash = "sha256-HbbD6q1r+W969+9LjDmIRcAI9rA1hoRbbjP0wAC0+Gs=";
+      rev = "6ed51c72bffbaa4f401e37352b8a9b6842041187"; # tpap-rv50-tls-fix
+      hash = "sha256-gpnO98kgpyQ/oA1vijejQx2aQaPby9WFG9uShUL1rDY=";
     };
     dependencies = (old.dependencies or old.propagatedBuildInputs or [ ]) ++ [
       ecdsa
