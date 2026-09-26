@@ -98,11 +98,13 @@ reverse proxy with authentication in front of it; the daemon has no
 accounts of its own.
 
 A carry room gets a run of its own, before the others.  For a
-`carry_in` room the job asks someone to carry the robot in before it
-starts, checks a minute into the run that the robot knows where it is
-(and stops it if it thinks it is in another room), and asks again if it
-comes back out mid-run.  For a `carry_out` room it asks each time the
-robot heads for the dock.  The question shows on the web page, on the
+`carry_in` room the run starts from the dock as usual (so the mops go on
+first), and the job asks someone to carry the robot in when it leaves
+the base; the robot waits at the doorstep.  A minute after it is put
+down the job checks that the robot knows where it is, and stops it if
+it thinks it is in another room.  "skip" drops the room and goes on with
+the rest.  For a `carry_out` room it asks each time the robot heads for
+the dock.  Lifting the robot and putting it down counts as "done".  The question shows on the web page, on the
 terminal of a standalone or `--wait` clean, and in `opentapovac status`;
 the job waits until someone answers or stops it.
 

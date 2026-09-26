@@ -214,7 +214,7 @@ class TerminalAsker:
         if code == "ask" and rec.get("job"):
             self.cancel()
             self._task = asyncio.get_running_loop().create_task(self._ask(rec["job"]))
-        elif code == "answered" or code in JOB_END:
+        elif code in ("answered", "carried", "skipped") or code in JOB_END:
             self.cancel()
 
     def cancel(self) -> None:
@@ -263,6 +263,8 @@ def print_job(j: dict[str, Any]) -> None:
     if j["message"]:
         line += f": {j['message']}"
     print(line)
+    for w in j.get("warnings") or []:
+        print(f"warning: {w}")
     if j.get("question"):
         q = j["question"]
         print(f"question: {q['text']} [{'/'.join(q['choices'])}] — `opentapovac answer CHOICE`")

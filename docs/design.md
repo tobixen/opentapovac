@@ -265,17 +265,21 @@ Where the build differs from the text above:
 * **Carry rooms go first**: each gets a run of its own, before the
   multi-room run, since whoever pressed the button is most likely still
   around.
-* **No pause**: `setRobotPause` is untried, so nothing is paused.  In a
-  `carry_out` run, "going home" (status 4 or `recharge_status` 1) raises
-  the question once per trip; the robot is left to stop at the doorstep
-  by itself (err 21).  In a `carry_in` run the question comes before the
-  send, and again each time the robot leaves the base mid-run (after a
-  mop wash, say): it can't climb back in either.  The engine does not
-  poll while it waits for the answer.
+* **No pause**: `setRobotPause` is untried, so nothing is paused, and the
+  engine keeps watching the robot while a question is open (standby then
+  doesn't count as giving up).  A carry-in run is sent from the dock like
+  any other, so the mops go on first; the question comes when the robot
+  leaves the base, and again each time it leaves it mid-run (after a mop
+  wash, say).  The robot stops at the doorstep by itself (2026-09-25).  A
+  carry-in room asked for later than first gets a warning.  In a
+  `carry_out` run the question comes once per trip home (status 4, or
+  `recharge_status` 1 away from the base).  Seeing the robot lifted
+  (err 4) and put down answers the question as "done"; "skip" (carry-in
+  only) stops that run and goes on with the next.
 * **VerifyPosition is not a step of its own**: `real_vac_coor` reads
   (0, 0) while docked, so the check is made during the run, once the robot
-  has been cleaning, not relocating, for `verify_after` (60 s) after a
-  carry-in.  Any pixel of the room within 15 cm of the position passes;
+  has been cleaning, not relocating, for `verify_after` (60 s) after the
+  carry.  Any pixel of the room within 15 cm of the position passes;
   another room's pixels stop the run (the app's stop payload) and fail the
   job; no room at all (wall, (0, 0)) is only a warning.
 * **Human wait timeout** raises an alert and keeps waiting; the job is

@@ -101,3 +101,13 @@ def test_bad_mode(config, table):
 
 def test_duplicates_dropped(config, table):
     assert ids(plan(JobRequest(rooms=["hall", "5", "Hall"]), table, config)) == [[5]]
+
+
+def test_warning_when_carry_in_room_not_first(config, table):
+    warnings = []
+    plan(JobRequest(rooms=["kitchen", "bedroom 2"]), table, config, warnings)
+    [w] = warnings
+    assert "bedroom 2" in w
+    warnings = []
+    plan(JobRequest(rooms=["bedroom 2", "kitchen", "living room"]), table, config, warnings)
+    assert warnings == []  # carry_out rooms go first too, but need no warning

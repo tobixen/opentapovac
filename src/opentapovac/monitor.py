@@ -12,9 +12,13 @@ spec, both from that log:
 Carry rooms (docs/design.md §3) are one room per run, so the monitor knows
 where the robot is without a position: in a `carry_out` run, heading home
 means leaving the room; in a `carry_in` run, leaving the base means heading
-for the room.  Either way it raises a question (`ask`) for the engine to put
-to a human.  The robot is not paused meanwhile: `setRobotPause` has not been
-tried yet.  It stops at the doorstep by itself (err 21 on the way out).
+for the room (the run is sent from the dock, so the mops are on before
+anyone carries it).  Either way it raises a question (`ask`) for a human.
+The robot is not paused meanwhile (`setRobotPause` is untried): it stops at
+the doorstep by itself.  The question is answered by `answer()`, or by the
+robot being seen lifted (err 4) and put down again.  While a question is
+open, standby doesn't count as giving up.  After a carry-in, `verify_due`
+says when the position is worth checking.
 """
 
 from __future__ import annotations
@@ -80,6 +84,8 @@ class MonitorParams:
     start_timeout: float = 120
     settle: float = 60
     gave_up_after: float = 300
+    #: after a carry-in: cleaning, not relocating, this long before the position is checked
+    verify_after: float = 60
 
 
 class IdleWatch:
@@ -135,10 +141,15 @@ class Monitor:
         self.phase = "starting"
         self.message = ""
         self.ask: Ask | None = None
+        #: set once after a carry-in; the caller checks the position and clears it
+        self.verify_due = False
+        self._lifted = False  # err 4 seen while a question is open
+        self._carried = False  # carried in, position not checked yet
+        self._steady_since: float | None = None  # cleaning, not relocating, since
         # carry_out: ask on the next trip home; armed once it is out cleaning, since
         # recharge_status reads 1 while it washes the mop at the start of a run
         self._out_armed = False
-        self._at_base = False  # carry_in: ask when it next leaves the base
+        self._at_base = True  # carry_in: ask when it next leaves the base; sent from the dock
         self._left_dock = False
         self._status: int | None = None
         self._errors: tuple[int, ...] = ()
@@ -183,7 +194,7 @@ class Monitor:
             return ev
 
         self._left_dock |= o.status in LEFT_DOCK
-        if o.status == 0:
+        if o.status == 0 and self.ask is None:
             if self._standby_since is None:
                 self._standby_since = o.t
             elif o.t - self._standby_since > self.p.gave_up_after:
@@ -192,12 +203,21 @@ class Monitor:
         else:
             self._standby_since = None
         ev += self._carry(o)
+        self._check_due(o)
         if self._idle.feed(o) and self._left_dock:
             self.phase = "done"
             ev.append(Event("info", "done", "run finished, robot is back on the dock"))
         return ev
 
     def _carry(self, o: Observation) -> list[Event]:
+        if self.ask is not None:
+            if 4 in o.errors:
+                self._lifted = True
+            elif self._lifted:
+                code = self.ask.code
+                self.answer("done")
+                return [Event("info", "carried", f"{code.replace('_', ' ')}: seen lifted and put down")]
+            return []
         if self.carry_out:
             if o.status == GOING_HOME or (o.recharging and o.status not in AT_BASE):
                 if self._out_armed:
@@ -210,17 +230,30 @@ class Monitor:
                 self._at_base = True
             elif o.status == CLEANING and self._at_base:
                 self._at_base = False
-                return self._ask("carry_in", f"the robot is on its way back: carry it into {self.room}", ["done"])
+                return self._ask("carry_in", f"the robot is heading for {self.room}: carry it in", ["done", "skip"])
         return []
 
     def _ask(self, code: str, text: str, choices: list[str]) -> list[Event]:
         self.ask = Ask(code, text, choices)
         return [Event("alert", code, text + ", then press " + " or ".join(choices))]
 
-    def resumed(self) -> None:
-        """A human answered: time spent waiting doesn't count as standby or settling."""
+    def answer(self, choice: str) -> None:
+        """The open question is answered (or seen done); waiting time doesn't count as standby or settling."""
+        if self.ask is not None and self.ask.code == "carry_in" and choice == "done":
+            self._carried, self._steady_since = True, None
+        self.ask, self._lifted = None, False
         self._standby_since = None
         self._idle = IdleWatch(self.p.settle)
+
+    def _check_due(self, o: Observation) -> None:
+        if not self._carried:
+            return
+        if o.status != CLEANING or o.relocating:
+            self._steady_since = None
+        elif self._steady_since is None:
+            self._steady_since = o.t
+        elif o.t - self._steady_since >= self.p.verify_after:
+            self._carried, self.verify_due = False, True
 
     def _fail(self, msg: str) -> list[Event]:
         self.phase, self.message = "failed", msg

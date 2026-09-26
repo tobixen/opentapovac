@@ -3,7 +3,8 @@
 * `order.first` / `order.last` from the config sort the rooms of a run;
   the rest keep the order they were asked for.
 * A carry room (`carry_in`, `carry_out`) gets a run of its own, before the
-  others: whoever pressed the button is most likely still around.
+  others: whoever pressed the button is most likely still around.  A
+  carry-in room asked for later than first gets a warning.
 * Forbidden rooms are refused without `force`.
 """
 
@@ -88,7 +89,8 @@ def order_rooms(rooms: list[Room], table: RoomTable, config: Config) -> list[Roo
     return [r for _, r in sorted(enumerate(rooms), key=key)]
 
 
-def plan(req: JobRequest, table: RoomTable, config: Config) -> list[Run]:
+def plan(req: JobRequest, table: RoomTable, config: Config, warnings: list[str] | None = None) -> list[Run]:
+    """The runs for `req`; things the requester should know are appended to `warnings`."""
     if not req.rooms:
         raise PlanError("no rooms given")
     d = config.defaults
@@ -109,6 +111,13 @@ def plan(req: JobRequest, table: RoomTable, config: Config) -> list[Run]:
     bad = [r.label for r in rooms if r.forbidden]
     if bad and not req.force:
         raise PlanError(f"refusing forbidden room(s) {', '.join(bad)} without force")
+    if warnings is not None:
+        for r in rooms[1:]:
+            if r.carry_in:
+                warnings.append(
+                    f"{r.label} goes first, not where it was asked for: someone carries the robot in "
+                    "when it heads there from the dock, after fitting the mops"
+                )
     rooms = order_rooms(rooms, table, config)
     carried = [Run([(r, settings)], r.carry_in, r.carry_out) for r in rooms if r.carry_in or r.carry_out]
     items = [(r, settings) for r in rooms if not (r.carry_in or r.carry_out)]

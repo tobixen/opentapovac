@@ -5,7 +5,7 @@ import pytest
 from opentapovac.engine import AnswerError, Busy, Engine, JobRequest, PlanError
 from opentapovac.payloads import STOP
 from opentapovac.rooms import RoomTable
-from tests.conftest import FakeClock, FakeRobot, make_map
+from tests.conftest import FakeClock, FakeRobot, make_map, vac
 
 
 def make_engine(config, events, robot, rooms=True):
@@ -155,44 +155,63 @@ def carry_config(config, **flags):
     return config
 
 
-#: status 1 held long enough for the position check (verify_after 60 s at 20 s polls)
-A_LONG_RUN = [16, 1, 1, 1, 1, 1, 4, 16]
 IN_ROOM_6 = [750, 250, 0]
 
 
-async def test_carry_in_asks_before_sending(config, events):
-    robot = FakeRobot(A_LONG_RUN, map_data=make_map(real_vac_coor=IN_ROOM_6))
-    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
-    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+async def carry_in_job(engine, robot, rooms=("outer hall",)):
+    """Submit, and wait for the carry-in question: the robot sits at "cleaning" on its way to the door."""
+    job = await engine.submit(JobRequest(rooms=list(rooms)))
     await until(lambda: job.question is not None)
+    return job
+
+
+async def test_carry_in_asks_once_it_leaves_the_base(config, events):
+    robot = FakeRobot([16, 17, 15, 1], map_data=make_map(real_vac_coor=IN_ROOM_6))
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await carry_in_job(engine, robot)
+    # sent at once: the mops go on before anyone carries it
+    assert [m for m, _ in robot.sent] == ["runCleanTask"]
     assert job.state == "waiting"
     assert "outer hall" in job.question.text
-    assert job.to_dict()["question"]["choices"] == ["done", "cancel"]
-    assert robot.sent == []
+    assert job.to_dict()["question"]["choices"] == ["done", "skip"]
     engine.answer(job.id, "done")
+    robot.statuses = [vac(1)] * 5 + [vac(4), vac(16)]
     await engine.wait()
     assert job.state == "done", job.message
     assert job.question is None
-    assert [m for m, _ in robot.sent] == ["runCleanTask"]
     assert {"ask", "answered", "position_ok"} <= {r["code"] for r in events.recent()}
 
 
-async def test_carry_in_cancel(config, events):
-    robot = FakeRobot(A_LONG_RUN)
+async def test_carry_in_seen_lifted_needs_no_answer(config, events):
+    robot = FakeRobot([16, 1], map_data=make_map(real_vac_coor=IN_ROOM_6))
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
-    job = await engine.submit(JobRequest(rooms=["outer hall"]))
-    await until(lambda: job.question is not None)
-    engine.answer(job.id, "cancel")
+    job = await carry_in_job(engine, robot)
+    robot.statuses = [vac(0, 4), vac(1)] + [vac(1)] * 5 + [vac(4), vac(16)]
     await engine.wait()
-    assert job.state == "stopped"
-    assert robot.sent == []
+    assert job.state == "done", job.message
+    assert {"carried", "position_ok"} <= {r["code"] for r in events.recent()}
+
+
+async def test_carry_in_skip_goes_on_with_the_rest(config, events):
+    robot = FakeRobot([16, 1])
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await carry_in_job(engine, robot, rooms=("kitchen", "outer hall"))
+    engine.answer(job.id, "skip")
+    robot.statuses = [vac(16), vac(1), vac(4), vac(16)]
+    await engine.wait()
+    assert job.state == "done", job.message
+    assert [(m, p.get("clean_on"), [a["id"] for a in p.get("area_list", [])]) for m, p in robot.sent] == [
+        ("runCleanTask", True, [6]),
+        ("runCleanTask", False, []),
+        ("runCleanTask", True, [1]),
+    ]
+    assert "skipped" in [r["code"] for r in events.recent()]
 
 
 async def test_position_wrong_stops_the_robot(config, events):
-    robot = FakeRobot(A_LONG_RUN, map_data=make_map(real_vac_coor=[200, 200, 0]))
+    robot = FakeRobot([16, 1], map_data=make_map(real_vac_coor=[200, 200, 0]))
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
-    job = await engine.submit(JobRequest(rooms=["outer hall"]))
-    await until(lambda: job.question is not None)
+    job = await carry_in_job(engine, robot)
     engine.answer(job.id, "done")
     await engine.wait()
     assert job.state == "failed"
@@ -201,63 +220,74 @@ async def test_position_wrong_stops_the_robot(config, events):
 
 
 async def test_position_unknown_warns(config, events):
-    robot = FakeRobot(A_LONG_RUN)  # real_vac_coor [0, 0, 0], as when docked
+    robot = FakeRobot([16, 1])  # real_vac_coor [0, 0, 0], as when docked
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
-    job = await engine.submit(JobRequest(rooms=["outer hall"]))
-    await until(lambda: job.question is not None)
+    job = await carry_in_job(engine, robot)
     engine.answer(job.id, "done")
+    robot.statuses = [vac(1)] * 5 + [vac(4), vac(16)]
     await engine.wait()
     assert job.state == "done", job.message
     assert "position_unknown" in [r["code"] for r in events.recent()]
 
 
 async def test_carry_out_waits_for_a_human(config, events):
-    robot = FakeRobot([16, 1, 1, 4, 4, 16])
+    robot = FakeRobot([16, 1, 1, 4])
     engine, _ = make_engine(carry_config(config, carry_out=True), events, robot)
     job = await engine.submit(JobRequest(rooms=["outer hall"]))
     await until(lambda: job.question is not None)
     assert job.question.choices == ["done"]
-    assert [m for m, _ in robot.sent] == ["runCleanTask"]
     engine.answer(job.id, "done")
+    robot.statuses = [vac(16)]
     await engine.wait()
     assert job.state == "done", job.message
 
 
 async def test_answer_errors(config, events):
-    engine, _ = make_engine(carry_config(config, carry_in=True), events, FakeRobot(A_LONG_RUN))
+    robot = FakeRobot([16, 1])
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
     with pytest.raises(AnswerError, match="no such job"):
         engine.answer("nope", "done")
-    job = await engine.submit(JobRequest(rooms=["outer hall"]))
-    await asyncio.sleep(0)
-    await until(lambda: job.question is not None)
+    job = await carry_in_job(engine, robot)
     with pytest.raises(AnswerError, match="choose one of"):
         engine.answer(job.id, "maybe")
-    engine.answer(job.id, "cancel")
+    engine.answer(job.id, "skip")
+    robot.statuses = [vac(16)]
     await engine.wait()
     with pytest.raises(AnswerError, match="not waiting"):
         engine.answer(job.id, "done")
 
 
 async def test_human_wait_timeout_alerts_but_keeps_waiting(config, events):
-    config.human_wait_timeout = 0.01
-    engine, _ = make_engine(carry_config(config, carry_in=True), events, FakeRobot(A_LONG_RUN))
-    job = await engine.submit(JobRequest(rooms=["outer hall"]))
-    await until(lambda: job.question is not None)
-    await asyncio.sleep(0.05)
+    config.human_wait_timeout = 100
+    robot = FakeRobot([16, 1])
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await carry_in_job(engine, robot)
+    await until(lambda: "ask_timeout" in [r["code"] for r in events.recent()])
+    await asyncio.sleep(0.01)
     assert job.state == "waiting"
     assert [r["level"] for r in events.recent() if r["code"] == "ask_timeout"] == ["alert"]
-    engine.answer(job.id, "cancel")
+    engine.answer(job.id, "skip")
+    robot.statuses = [vac(16)]
     await engine.wait()
 
 
 async def test_stop_while_waiting(config, events):
-    robot = FakeRobot(A_LONG_RUN)
+    robot = FakeRobot([16, 1])
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
-    job = await engine.submit(JobRequest(rooms=["outer hall"]))
-    await until(lambda: job.question is not None)
+    job = await carry_in_job(engine, robot)
     await engine.stop()
     assert job.state == "stopped"
     assert job.question is None
+
+
+async def test_warns_when_carry_in_room_is_not_first(config, events):
+    robot = FakeRobot([16, 1])
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await carry_in_job(engine, robot, rooms=("kitchen", "outer hall"))
+    assert any("outer hall" in w for w in job.warnings)
+    assert job.to_dict()["warnings"] == job.warnings
+    assert "plan_warning" in [r["code"] for r in events.recent()]
+    await engine.stop()
 
 
 async def test_order_applied(config, events):

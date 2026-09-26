@@ -150,8 +150,7 @@ def asks(m, observations):
         m.step(o)
         if m.ask:
             out.append(m.ask.code)
-            m.ask = None
-            m.resumed()
+            m.answer("done")
     return out
 
 
@@ -180,8 +179,8 @@ def test_no_carry_questions_by_default():
 
 def test_carry_in_asks_each_time_it_leaves_the_base():
     m = Monitor(sent_at=0, params=P, room="bedroom 2", carry_in=True)
-    # carried in by hand before the send: no question on the first "cleaning"
-    assert asks(m, [obs(20, 1), obs(40, 1)]) == []
+    # sent from the dock: vacuum only goes straight to "cleaning"
+    assert asks(m, [obs(20, 1), obs(40, 1)]) == ["carry_in"]
     # home to wash the mop, then out again: it can't climb in by itself
     assert asks(m, [obs(60, 4), obs(80, 15), obs(100, 1), obs(120, 1)]) == ["carry_in"]
 
@@ -199,13 +198,44 @@ def test_ask_text_names_the_room():
     assert m.ask.choices == ["done"]
 
 
-def test_resumed_restarts_the_standby_clock():
+def test_no_giving_up_while_a_human_is_asked():
     m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
-    feed(m, [obs(20, 1), obs(40, 4), obs(60, 0, 21)])
-    m.ask = None
-    m.resumed()  # the human took 20 minutes
-    feed(m, [obs(1300, 0, 21)])
+    feed(m, [obs(20, 1), obs(40, 4), obs(60, 0, 21), obs(1300, 0, 21)])
     assert m.phase == "running"
+    m.answer("done")  # the standby clock starts again
+    feed(m, [obs(1320, 0, 21), obs(1500, 0, 21)])
+    assert m.phase == "running"
+    feed(m, [obs(1700, 0, 21)])
+    assert m.phase == "failed"
+
+
+def test_lifted_and_put_down_answers_the_question():
+    m = Monitor(sent_at=0, params=P, room="bedroom 2", carry_in=True)
+    feed(m, [obs(20, 17), obs(40, 1)])
+    assert m.ask.code == "carry_in"
+    feed(m, [obs(60, 0, 4)])
+    assert m.ask is not None
+    events = feed(m, [obs(80, 1, relocating=True)])
+    assert m.ask is None
+    assert "carried" in codes(events)
+
+
+def test_position_check_due_after_the_carry():
+    p = MonitorParams(verify_after=60)
+    m = Monitor(sent_at=0, params=p, room="bedroom 2", carry_in=True)
+    feed(m, [obs(20, 1), obs(40, 1), obs(60, 1), obs(80, 1), obs(100, 1)])
+    assert not m.verify_due  # still on its way to the door
+    m.answer("done")
+    feed(m, [obs(120, 1, relocating=True), obs(140, 1, relocating=False), obs(180, 1)])
+    assert not m.verify_due
+    feed(m, [obs(200, 1)])
+    assert m.verify_due
+
+
+def test_no_position_check_without_carry_in():
+    m = Monitor(sent_at=0, params=MonitorParams(verify_after=60), room="living room", carry_out=True)
+    feed(m, [obs(20, 1), obs(100, 1), obs(200, 1)])
+    assert not m.verify_due
 
 
 def test_recharge_status_in_observation():

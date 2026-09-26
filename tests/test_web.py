@@ -123,7 +123,7 @@ async def test_daemon_client_not_running():
 
 async def test_answer(make_client, config):
     config.rooms[6] = {"aliases": ["outer hall"], "carry_in": True}
-    client, engine, robot = await make_client(statuses=(16, 1, 4, 16))
+    client, engine, robot = await make_client(statuses=(16, 1))
     job = await (await client.post("/jobs", json={"rooms": ["outer hall"]})).json()
     for _ in range(1000):
         if engine.job.question:
@@ -131,12 +131,13 @@ async def test_answer(make_client, config):
         await asyncio.sleep(0)
     got = await (await client.get(f"/jobs/{job['id']}")).json()
     assert got["state"] == "waiting"
-    assert got["question"]["choices"] == ["done", "cancel"]
+    assert got["question"]["choices"] == ["done", "skip"]
     assert (await client.post(f"/jobs/{job['id']}/answer", json={"choice": "maybe"})).status == 400
     assert (await client.post("/jobs/nope/answer", json={"choice": "done"})).status == 404
-    assert (await client.post(f"/jobs/{job['id']}/answer", json={"choice": "cancel"})).status == 200
+    assert (await client.post(f"/jobs/{job['id']}/answer", json={"choice": "skip"})).status == 200
+    robot.statuses = [{"status": 16, "err_status": []}]
     await engine.wait()
-    assert engine.job.state == "stopped"
+    assert engine.job.state == "done"
     await client.close()
 
 

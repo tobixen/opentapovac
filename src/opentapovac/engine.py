@@ -40,10 +40,6 @@ class JobFailed(Exception):
     pass
 
 
-class JobCancelled(Exception):
-    """A human chose "cancel"."""
-
-
 class AnswerError(ValueError):
     """An answer to a question that isn't asked, or a choice that isn't offered."""
 
@@ -59,6 +55,7 @@ class Job:
     created: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     finished: str | None = None
     question: Ask | None = None
+    warnings: list[str] = field(default_factory=list)
     _answer: asyncio.Future | None = field(default=None, repr=False)
 
     @property
@@ -79,6 +76,7 @@ class Job:
             "description": self.describe(),
             "rooms": [[r.id for r in run.rooms] for run in self.runs],
             "question": {"code": q.code, "text": q.text, "choices": q.choices} if q else None,
+            "warnings": self.warnings,
             "created": self.created,
             "finished": self.finished,
         }
@@ -102,12 +100,12 @@ class Engine:
         self.jobs: dict[str, Job] = {}
         self._task: asyncio.Task | None = None
         self._png: bytes | None = None
-        self.params = MonitorParams(config.start_timeout, config.settle, config.gave_up_after)
+        self.params = MonitorParams(config.start_timeout, config.settle, config.gave_up_after, config.verify_after)
 
     # --- planning ---
 
-    def plan(self, req: JobRequest) -> list[Run]:
-        return plan(req, self.rooms, self.config)
+    def plan(self, req: JobRequest, warnings: list[str] | None = None) -> list[Run]:
+        return plan(req, self.rooms, self.config, warnings)
 
     # --- jobs ---
 
@@ -121,7 +119,8 @@ class Engine:
             raise Busy(f"job {self.job.id} is still {self.job.state}")
         if not len(self.rooms):
             await self.refresh_rooms()
-        job = Job(req, self.plan(req))
+        warnings: list[str] = []
+        job = Job(req, self.plan(req, warnings), warnings=warnings)
         self.job = self.jobs[job.id] = job
         self._task = asyncio.create_task(self._run(job))
         return job
@@ -143,13 +142,13 @@ class Engine:
     async def _run(self, job: Job) -> None:
         job.state = "running"
         self._emit("info", f"job {job.id}: {job.describe()}", "job", job)
+        for w in job.warnings:
+            self._emit("warn", w, "plan_warning", job)
         try:
             await self._preflight(job)
             for i, run in enumerate(job.runs):
                 job.step = i + 1
                 await self._wait_idle(job)
-                if run.carry_in:
-                    await self._carry_in(job, run.rooms[0])
                 await self._send(job, run)
                 await self._follow(job, run)
             job.state = "done"
@@ -157,9 +156,6 @@ class Engine:
         except asyncio.CancelledError:
             job.state = "stopped"
             self._emit("warn", f"job {job.id} stopped", "job_stopped", job)
-        except JobCancelled as e:
-            job.state, job.message = "stopped", str(e)
-            self._emit("warn", f"job {job.id} stopped: {e}", "job_stopped", job)
         except (RobotError, JobFailed) as e:
             job.state, job.message = "failed", str(e)
             self._emit("error", f"job {job.id} failed: {e}", "job_failed", job)
@@ -173,24 +169,15 @@ class Engine:
 
     # --- humans ---
 
-    async def ask(self, job: Job, q: Ask) -> str:
-        """Put `q` to a human and wait for the answer, however long it takes.
-
-        After `human_wait_timeout` an alert says nobody has answered; the job
-        keeps waiting and never goes on by itself.  `stop` ends the wait.
-        """
+    def _pose(self, job: Job, q: Ask) -> None:
+        """Put `q` to a human.  The job goes on watching the robot; it never goes on without the answer."""
         job.question, job._answer = q, asyncio.get_running_loop().create_future()
         job.state = "waiting"
         self._emit("alert", f"{q.text} — waiting for: {' / '.join(q.choices)}", "ask", job)
-        try:
-            try:
-                return await asyncio.wait_for(asyncio.shield(job._answer), self.config.human_wait_timeout)
-            except TimeoutError:
-                self._emit("alert", f"nobody has answered: {q.text}", "ask_timeout", job)
-                return await job._answer
-        finally:
-            job.question = job._answer = None
-            job.state = "running"
+
+    def _unpose(self, job: Job) -> None:
+        job.question = job._answer = None
+        job.state = "running"
 
     def answer(self, job_id: str, choice: str) -> None:
         job = self.jobs.get(job_id)
@@ -203,11 +190,6 @@ class Engine:
         fut, job.question, job.state = job._answer, None, "running"
         self._emit("info", f"answered: {choice}", "answered", job)
         fut.set_result(choice)
-
-    async def _carry_in(self, job: Job, room: Room) -> None:
-        q = Ask("carry_in", f"carry the robot into {room.label} and put it down", ["done", "cancel"])
-        if await self.ask(job, q) == "cancel":
-            raise JobCancelled(f"{room.label} cancelled")
 
     async def _verify_position(self, job: Job, room: Room) -> None:
         """After a carry-in: is the robot where it was put?  Wrong = stop, before it cleans by a wrong map."""
@@ -281,37 +263,48 @@ class Engine:
     async def _follow(self, job: Job, run: Run) -> None:
         room = run.rooms[0]
         m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out)
-        #: after a carry-in: when the robot has been cleaning, not relocating, since then
-        verify: float | None = None
-        check = run.carry_in
-        while True:
-            await self.sleep(self.config.poll_interval)
-            try:
-                o = await self._observe()
-            except RobotError as e:
-                # a lost poll is not a lost run; keep watching
-                self._emit("warn", f"poll failed: {e}", "poll_failed", job)
-                continue
-            for ev in m.step(o):
-                self._emit(ev.level, ev.msg, ev.code, job)
-            if m.phase == "done":
-                return
-            if m.phase == "failed":
-                raise JobFailed(m.message)
-            if m.ask:
-                await self.ask(job, m.ask)
-                m.ask = None
-                m.resumed()
-                check, verify = run.carry_in, None
-                continue
-            if check:
-                if o.status != 1 or o.relocating:
-                    verify = None
-                elif verify is None:
-                    verify = o.t
-                elif o.t - verify >= self.config.verify_after:
-                    check = False
+        posed: Ask | None = None
+        posed_at, told = 0.0, False
+        try:
+            while True:
+                await self.sleep(self.config.poll_interval)
+                if posed is not None and job._answer is not None and job._answer.done():
+                    choice = job._answer.result()
+                    self._unpose(job)
+                    posed = None
+                    if choice == "skip":
+                        await self.robot.send("runCleanTask", STOP)
+                        self._emit("warn", f"skipped {room.label}: stop sent", "skipped", job)
+                        return
+                    m.answer(choice)
+                try:
+                    o = await self._observe()
+                except RobotError as e:
+                    # a lost poll is not a lost run; keep watching
+                    self._emit("warn", f"poll failed: {e}", "poll_failed", job)
+                    continue
+                for ev in m.step(o):
+                    self._emit(ev.level, ev.msg, ev.code, job)
+                if m.phase == "done":
+                    return
+                if m.phase == "failed":
+                    raise JobFailed(m.message)
+                if m.ask is not posed:  # a new question, or the monitor saw the old one done
+                    if posed is not None:
+                        self._unpose(job)
+                    if m.ask is not None:
+                        self._pose(job, m.ask)
+                        posed_at, told = self.clock(), False
+                    posed = m.ask
+                elif posed is not None and not told and self.clock() - posed_at > self.config.human_wait_timeout:
+                    told = True
+                    self._emit("alert", f"nobody has answered: {posed.text}", "ask_timeout", job)
+                if m.verify_due:
+                    m.verify_due = False
                     await self._verify_position(job, room)
+        finally:
+            if posed is not None:
+                self._unpose(job)
 
     # --- direct commands ---
 
