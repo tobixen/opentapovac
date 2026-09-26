@@ -17,3 +17,21 @@
   2026-09-26 evening).  Which rooms were done is unknown; design.md §4.3
   wants "queue the rest".  The recorded track and the clean record are
   the evidence to go on.
+
+## From the code review (2026-09-26)
+
+* **`stop()` may cancel a query mid-flight**, then send STOP at once; if
+  the TPAP session is left out of step, STOP fails (502) and the job says
+  "stopped" while the robot runs on.  Never seen; test on the robot, then
+  close the session on `CancelledError` in `KasaRobot._raw` or retry STOP.
+* **Cleared-track detection** only notices `total_points < start`; a track
+  regrown past that between polls is glued onto the old segment, minus its
+  start.  Decide with a few server-recorded runs: compare the first point,
+  or refetch from 0 after an error.
+* **API error handling:** `?backlog=abc` gives a text 500, and the CLI then
+  shows a traceback (`ContentTypeError`).  Validate, add a JSON catch-all to
+  the middleware, read non-JSON error bodies as text.
+* **CLI on the NixOS host:** the state dir is 0700 under `DynamicUser`, so
+  `opentapovac log` (without `-f`) shows nothing and the standalone
+  fallback tracebacks on the credentials.  Document, or give the service a
+  fixed group an admin can join.
