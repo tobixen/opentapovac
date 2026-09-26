@@ -4,7 +4,8 @@ Replaces the old spec `tapo-clean-spec.md`
 ("tapo-clean"), which is still the reference for payloads, status
 codes, pitfalls and the robot tests.  This document only covers what
 changes: a daemon, a web UI for the family, and the home-specific
-logic.  Nothing here is built.
+logic.  Milestones 1–3 are built (2026-09-26), see §9; none of it has
+cleaned a room yet.
 
 ## 0. Arguments against, read first
 
@@ -78,7 +79,7 @@ opentapovac/
   events.py     event log (sqlite or jsonl), timestamps in UTC, shown in
                 Europe/Oslo
   notify.py     later: ntfy / desktop / email, pluggable
-  mapimg.py     tapo-render-map.py turned into a module, + track overlay
+  mapimg.py     map + track rendering (was the tapo-render-map.py prototype)
   web/          small server + one page, no JS build step
   cli.py        opentapovac clean|status|stop|home|rooms|log|serve
 ```
@@ -243,6 +244,26 @@ spec still gate the features that depend on them.
 5. Recovery with waypoints (after `gotoPoint` is verified).
 6. Notifications, deployment (NixOS module / puppet), router WireGuard
    as client.  Host not chosen yet.
+
+State 2026-09-26: 1–3 are written and tested against a scripted robot and
+the recorded 2026-09-24 evening log; read-only calls (status, rooms, map)
+were checked against the real robot.  No run has been sent by it yet.
+Where the build differs from the text above:
+
+* **Idle** (safe to send the next run) is 16, or 5/6 held for `settle`
+  (60 s), not "5/6 seen twice": in the evening log the robot sat at 5 for
+  ~30 s after coming home and then went on to wash the mop.  Standby (0)
+  without an error, held as long, also counts, with a warning — the robot
+  reported standby on the dock at 100 % on 2026-09-26.
+* **Err 21 is not the end of the run**: the robot went home by itself
+  ~90 s later both times it happened.  Standby during a run counts as
+  given up only after `gave_up_after` (300 s).
+* **Stop** is the app's stop payload (protocol.md); the robot heads home
+  by itself afterwards.  **Home** (`setSwitchCharge`) is from the app and
+  not yet sent; the web page has no button for it.
+* The web page selects rooms and then starts; the presets start at once.
+* `POST /jobs/{id}/answer` waits for milestone 4: nothing asks a human yet.
+* Extra endpoints: `GET /ping`, `GET /rooms`, `POST /rooms/refresh`.
 
 ## 10. Decisions (2026-09-26)
 

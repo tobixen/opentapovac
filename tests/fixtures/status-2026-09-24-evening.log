@@ -1,0 +1,39 @@
+21:06:24 SEND runCleanTask-kitchen-vac-then-mop.json: {"runCleanTask":null}
+21:06:49 {"getVacStatus":{"status":1,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:09:03 {"getVacStatus":{"status":7,"err_status":[3],"errorCode_id":[448794],"prompt":[],"promptCode_id":[]}}
+21:10:10 {"getVacStatus":{"status":1,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:14:39 {"getVacStatus":{"status":4,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:15:46 {"getVacStatus":{"status":17,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:16:30 {"getVacStatus":{"status":15,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:18:21 {"getVacStatus":{"status":1,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:28:51 {"getVacStatus":{"status":4,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:29:35 {"getVacStatus":{"status":5,"err_status":[],"errorCode_id":[],"prompt":[0],"promptCode_id":[450033]}}
+21:29:35 SEND runCleanTask-outerhall-vac-then-mop.json: 
+21:30:07 WAIT {"getVacStatus":{"status":19,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:30:29 WAIT {"getVacStatus":{"status":19,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:30:51 WAIT {"getVacStatus":{"status":17,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[0],"promptCode_id":[450110]}}
+21:31:13 WAIT {"getVacStatus":{"status":17,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:31:35 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:31:58 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:32:20 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:32:42 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:33:04 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:33:26 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:33:48 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:34:10 WAIT {"getVacStatus":{"status":15,"remain_dry_time":0,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:34:32 WAIT {"getVacStatus":{"status":16,"remain_dry_time":180,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:34:54 WAIT {"getVacStatus":{"status":16,"remain_dry_time":179,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:34:54 SEND runCleanTask-outerhall-vac-then-mop.json: {"runCleanTask":null}
+21:35:19 {"getVacStatus":{"status":1,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:39:19 {"getVacStatus":{"status":4,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:40:51 {"getVacStatus":{"status":17,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:41:14 {"getVacStatus":{"status":15,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:43:13 {"getVacStatus":{"status":1,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:47:36 {"getVacStatus":{"status":4,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:49:12 {"getVacStatus":{"status":0,"err_status":[21],"errorCode_id":[451203],"prompt":[],"promptCode_id":[]}}
+21:50:44 {"getVacStatus":{"status":4,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:52:15 {"getVacStatus":{"status":19,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:53:00 {"getVacStatus":{"status":9,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:53:24 {"getVacStatus":{"status":17,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:53:46 {"getVacStatus":{"status":15,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}
+21:56:26 {"getVacStatus":{"status":16,"err_status":[],"errorCode_id":[],"prompt":[],"promptCode_id":[]}}

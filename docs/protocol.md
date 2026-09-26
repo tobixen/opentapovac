@@ -99,7 +99,7 @@ with `map_id`, base64 `map_name`, `map_locked`, `is_saved`.
 
 **The map's y axis points up**: pixel row r is at `y = origin_y + r ×
 resolution`.  Drawn with image rows top-down, the map comes out mirrored.
-`tapo-render-map.py DUMP.json OUT.png [id=name …]` renders it
+`opentapovac render-map DUMP.json OUT.png [id=name …]` renders it
 correctly, with rooms, no-go zones, virtual walls, dock and robot marked.
 
 ### `area_list` entries
@@ -184,7 +184,13 @@ mop of one room:
 ```
 
 Returns `null`; `getVacStatus` goes 16 (drying) → 1 (cleaning).  The app
-stops a run with `runCleanTask {"clean_on": false, ...defaults}`.
+stops a run with `runCleanTask` and the `RobotRunCleanTaskParams`
+defaults, nulls left out by Gson (*from app*; OpenTapoVac sends exactly this):
+
+```json
+{"clean_on": false, "support_continue": true, "start_type": 1, "clean_mode": 0,
+ "force_clean": false, "is_custom": false, "clean_order": true, "dust_collection": true}
+```
 
 * **`kasa command` parses params with `ast.literal_eval`**, so JSON
   `true`/`false`/`null` fail *silently* (no output, nothing sent).  Convert
@@ -234,6 +240,9 @@ From the app, not yet sent:
   `support_continue`, `is_custom`.
 * Quick tasks: `getCleanTaskGroupList`, `getSpecificCleanTaskGroup`,
   `addCleanTaskGroup`, `startCleanTaskGroup {"group_id": n}`.
+* `setSwitchCharge {"switch_charge": true}` sends the robot home
+  (`RobotDetailRepository.ea`, `RobotGotoChargeStatus`); `setRobotPause`
+  takes a `RobotPause`.
 * Also present: `setCleanAttr`, `get/setCleanOrder`, `setRobotPause`,
   `setSwitchCharge`, `setGotoDustCollection`, `setSwitchDustCollection`,
   `setWashMopSwitch`, `setDryMopSwitch`, `getBaseStatus`.
@@ -271,7 +280,7 @@ pairs in map mm.  The low 2 bits of x and y give the point type
 are not track points.  The path covers the current or last run only (it
 grows until the robot is back on the dock, and the next run starts it
 over).  Short magenta bits (unknown type) show up in some corners.
-`tapo-render-map.py … --path PATH.json` draws it.
+`opentapovac render-map … --path PATH.json` draws it.
 
 ## Movement — *from app*, not yet sent; the robot moves
 

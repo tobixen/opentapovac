@@ -29,9 +29,9 @@ background and the original questions are in `original-questions.md` and
   ```
 
   Don't add `-v` to `state`: it prints the password in reversible form.
-* **Map renderer:** `tapo-render-map.py DUMP.json OUT.png [--path PATH.json]`
-  (prototype, to become `mapimg.py`); `--path` draws a `getPathData` dump, i.e. the track.
-  Run with `uv run --no-project --with lz4 --with pillow python …`.
+* **Map renderer:** `opentapovac render-map DUMP.json OUT.png [--path PATH.json]`
+  renders saved dumps; `--path` draws a `getPathData` dump, i.e. the track.
+  `opentapovac map OUT.png` fetches both from the robot.
 * **Payloads:** `payloads/`.  The decompiled app and the map dumps are
   not in this repository.
 * **Phone:** Android, Tapo app 3.20.754.  Paired with the
