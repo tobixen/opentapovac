@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -24,6 +25,8 @@ from .monitor import IdleWatch, Monitor, MonitorParams, Observation
 from .payloads import HOME, MODE_LABELS, STOP, Settings, run_payload
 from .robot import Robot, RobotError
 from .rooms import Room, RoomError, RoomTable
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class PlanError(ValueError):
@@ -191,6 +194,10 @@ class Engine:
         except (RobotError, JobFailed) as e:
             job.state, job.message = "failed", str(e)
             self._emit("error", f"job {job.id} failed: {e}", "job_failed", job)
+        except Exception as e:  # a bug; the job must still end, or it stays "running" forever
+            _LOGGER.debug("job %s", job.id, exc_info=True)
+            job.state, job.message = "failed", f"{type(e).__name__}: {e}"
+            self._emit("error", f"job {job.id} failed: {job.message}", "job_failed", job)
         finally:
             job.finished = datetime.now(UTC).isoformat(timespec="seconds")
 

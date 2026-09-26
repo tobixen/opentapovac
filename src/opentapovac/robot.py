@@ -102,6 +102,12 @@ class KasaRobot(Robot):
         except (TimeoutError, OSError) as e:
             await self.close()
             raise RobotError(f"{method}: {e!r}") from e
+        except Exception as e:
+            # a bug in the library (the TPAP branch is unreleased): one line for
+            # the user, the traceback with -v
+            _LOGGER.debug("%s failed", method, exc_info=True)
+            await self.close()
+            raise RobotError(f"{method}: {type(e).__name__}: {e} (python-kasa bug? -v shows the traceback)") from e
         if method not in reply:
             raise RobotError(f"{method}: empty reply")
         return reply[method]

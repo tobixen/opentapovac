@@ -129,3 +129,14 @@ async def test_standby_counts_as_idle_with_warning(config, events):
     job = await engine.run(JobRequest(rooms=["kitchen"]))
     assert job.state == "done", job.message
     assert "standby" in [r["code"] for r in events.recent()]
+
+
+async def test_unexpected_error_fails_job(config, events):
+    class Broken(FakeRobot):
+        async def _raw(self, method, params):
+            raise TypeError("boom")
+
+    engine, _ = make_engine(config, events, Broken())
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "failed"
+    assert "boom" in job.message
