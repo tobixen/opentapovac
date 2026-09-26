@@ -43,6 +43,9 @@ class DaemonClient:
     async def job(self, job_id: str) -> dict[str, Any]:
         return await self._call("GET", f"/jobs/{job_id}")
 
+    async def answer(self, job_id: str, choice: str) -> dict[str, Any]:
+        return await self._call("POST", f"/jobs/{job_id}/answer", {"choice": choice})
+
     async def status(self) -> dict[str, Any]:
         return await self._call("GET", "/status")
 

@@ -52,6 +52,28 @@ def track_points(path_data: dict[str, Any]) -> list[tuple[int, int]]:
     return [struct.unpack_from(">hh", buf, i) for i in range(8, len(buf) - 3, 4)]
 
 
+def pixels(map_data: dict[str, Any]) -> bytes:
+    """The pixel grid, row-major from `real_origin_coor`; row r is at y = origin_y + r × resolution."""
+    d = map_data
+    return lz4.block.decompress(base64.b64decode(d["map_data"]), uncompressed_size=d["pix_len"])
+
+
+def rooms_near(map_data: dict[str, Any], xy: tuple[float, float], radius: float = 150) -> set[int]:
+    """Ids of the rooms with pixels within `radius` mm of the map point `xy` (mm)."""
+    d = map_data
+    w, h, res = d["width"], d["height"], d["resolution"]
+    ids = {a["id"] for a in d.get("area_list", []) if a.get("type") == "room"}
+    raw = pixels(d)
+    cx, cy = (xy[0] - d["real_origin_coor"][0]) / res, (xy[1] - d["real_origin_coor"][1]) / res
+    r = radius / res
+    found = set()
+    for y in range(max(0, int(cy - r)), min(h, int(cy + r) + 1)):
+        for x in range(max(0, int(cx - r)), min(w, int(cx + r) + 1)):
+            if (x - cx) ** 2 + (y - cy) ** 2 <= r * r and raw[y * w + x] in ids:
+                found.add(raw[y * w + x])
+    return found
+
+
 def render(
     map_data: dict[str, Any],
     path_data: dict[str, Any] | None = None,
@@ -60,7 +82,7 @@ def render(
 ) -> Image.Image:
     d = map_data
     w, h, res = d["width"], d["height"], d["resolution"]
-    raw = lz4.block.decompress(base64.b64decode(d["map_data"]), uncompressed_size=d["pix_len"])
+    raw = pixels(d)
     names = {**room_names(d), **(names or {})}
 
     img = Image.new("RGB", (w, h))

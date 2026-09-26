@@ -37,3 +37,13 @@ def test_png_roundtrip():
     from opentapovac.mapimg import png_bytes
 
     assert Image.open(io.BytesIO(png_bytes(make_map()))).format == "PNG"
+
+
+def test_rooms_near():
+    from opentapovac.mapimg import rooms_near
+
+    d = make_map()  # room 1 left of x=500 mm, room 6 right of it, 50 mm pixels
+    assert rooms_near(d, (200, 200)) == {1}
+    assert rooms_near(d, (750, 250)) == {6}
+    assert rooms_near(d, (480, 250)) == {1, 6}
+    assert rooms_near(d, (5000, 5000)) == set()

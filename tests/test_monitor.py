@@ -141,3 +141,82 @@ def test_idle_watch_standby():
     w = IdleWatch(settle=60)
     assert not w.feed(obs(0, 0, 21))
     assert not w.feed(obs(100, 0, 21))
+
+
+def asks(m, observations):
+    """Feed observations; the codes of the questions the monitor raises."""
+    out = []
+    for o in observations:
+        m.step(o)
+        if m.ask:
+            out.append(m.ask.code)
+            m.ask = None
+            m.resumed()
+    return out
+
+
+def test_carry_out_asks_when_heading_home():
+    m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
+    assert asks(m, [obs(20, 1), obs(40, 1), obs(60, 4)]) == ["carry_out"]
+
+
+def test_carry_out_asks_once_per_trip_home():
+    m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
+    trip = [obs(20, 1), obs(40, 4), obs(60, 4), obs(80, 0, 21), obs(100, 4), obs(120, 15)]
+    assert asks(m, trip) == ["carry_out"]
+    # back in by itself after washing the mop, then home again
+    assert asks(m, [obs(140, 1), obs(160, 4)]) == ["carry_out"]
+
+
+def test_carry_out_on_recharge_status():
+    m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
+    assert asks(m, [obs(20, 1), obs(40, 1, recharging=True)]) == ["carry_out"]
+
+
+def test_no_carry_questions_by_default():
+    m = Monitor(sent_at=0, params=P)
+    assert asks(m, [obs(20, 17), obs(40, 1), obs(60, 4), obs(80, 15), obs(100, 1), obs(120, 4)]) == []
+
+
+def test_carry_in_asks_each_time_it_leaves_the_base():
+    m = Monitor(sent_at=0, params=P, room="bedroom 2", carry_in=True)
+    # carried in by hand before the send: no question on the first "cleaning"
+    assert asks(m, [obs(20, 1), obs(40, 1)]) == []
+    # home to wash the mop, then out again: it can't climb in by itself
+    assert asks(m, [obs(60, 4), obs(80, 15), obs(100, 1), obs(120, 1)]) == ["carry_in"]
+
+
+def test_carry_in_after_fitting_the_mop_at_the_start():
+    m = Monitor(sent_at=0, params=P, room="bedroom 2", carry_in=True)
+    assert asks(m, [obs(20, 17), obs(40, 15), obs(60, 1)]) == ["carry_in"]
+
+
+def test_ask_text_names_the_room():
+    m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
+    events = feed(m, [obs(20, 1), obs(40, 4)])
+    assert [e.level for e in events if e.code == "carry_out"] == ["alert"]
+    assert "living room" in m.ask.text
+    assert m.ask.choices == ["done"]
+
+
+def test_resumed_restarts_the_standby_clock():
+    m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
+    feed(m, [obs(20, 1), obs(40, 4), obs(60, 0, 21)])
+    m.ask = None
+    m.resumed()  # the human took 20 minutes
+    feed(m, [obs(1300, 0, 21)])
+    assert m.phase == "running"
+
+
+def test_recharge_status_in_observation():
+    o = Observation.from_replies(0, {"status": 1}, {"recharge_status": 1, "is_relocating": False})
+    assert o.recharging is True
+    assert Observation.from_replies(0, {"status": 1}, {"recharge_status": 0}).recharging is False
+    assert Observation.from_replies(0, {"status": 1}).recharging is None
+
+
+def test_carry_out_not_asked_while_washing_the_mop_before_the_start():
+    # 2026-09-26: a vac-and-mop run started with 15 at the base, recharge_status 1
+    m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
+    assert asks(m, [obs(20, 15, recharging=True), obs(40, 17, recharging=True)]) == []
+    assert asks(m, [obs(60, 1), obs(80, 4)]) == ["carry_out"]

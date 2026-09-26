@@ -76,3 +76,72 @@ def test_completion_hook():
     from hatch_build import completion_snippet
 
     assert "opentapovac" in completion_snippet()
+
+
+@pytest.mark.parametrize(
+    ("line", "choice"), [("done", "done"), ("D\n", "done"), (" can ", "cancel"), ("x", None), ("", None)]
+)
+def test_parse_choice(line, choice):
+    from opentapovac.cli import parse_choice
+
+    assert parse_choice(line, ["done", "cancel"]) == choice
+
+
+def test_answer_parser():
+    assert parse("answer", "done").choice == "done"
+    assert parse("answer").choice is None
+
+
+async def test_terminal_asker(monkeypatch, capsys):
+    import asyncio
+    import os
+
+    from opentapovac.cli import TerminalAsker
+
+    r, w = os.pipe()
+    monkeypatch.setattr("sys.stdin", stdin := os.fdopen(r))
+    os.write(w, b"x\ncan\n")
+    sent = []
+
+    async def fetch(job_id):
+        return {"text": "carry it in", "choices": ["done", "cancel"]}
+
+    async def send(job_id, choice):
+        sent.append((job_id, choice))
+
+    asker = TerminalAsker(fetch, send)
+    asker.feed({"code": "ask", "job": "j1"})
+    for _ in range(100):
+        if sent:
+            break
+        await asyncio.sleep(0.01)
+    assert sent == [("j1", "cancel")]
+    assert capsys.readouterr().out.count("carry it in [done/cancel]") == 2
+    os.close(w)
+    stdin.close()
+
+
+async def test_terminal_asker_cancelled_by_answer_elsewhere(monkeypatch):
+    import asyncio
+    import os
+
+    from opentapovac.cli import TerminalAsker
+
+    r, w = os.pipe()
+    monkeypatch.setattr("sys.stdin", stdin := os.fdopen(r))
+
+    async def fetch(job_id):
+        return {"text": "q", "choices": ["done"]}
+
+    async def send(job_id, choice):
+        raise AssertionError("must not send")
+
+    asker = TerminalAsker(fetch, send)
+    asker.feed({"code": "ask", "job": "j1"})
+    await asyncio.sleep(0.01)
+    task = asker._task
+    asker.feed({"code": "answered", "job": "j1"})
+    await asyncio.sleep(0.01)
+    assert task.cancelled()
+    os.close(w)
+    stdin.close()

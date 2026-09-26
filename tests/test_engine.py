@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from opentapovac.engine import Busy, Engine, JobRequest, PlanError
+from opentapovac.engine import AnswerError, Busy, Engine, JobRequest, PlanError
 from opentapovac.payloads import STOP
 from opentapovac.rooms import RoomTable
 from tests.conftest import FakeClock, FakeRobot, make_map
@@ -140,3 +140,130 @@ async def test_unexpected_error_fails_job(config, events):
     job = await engine.run(JobRequest(rooms=["kitchen"]))
     assert job.state == "failed"
     assert "boom" in job.message
+
+
+async def until(pred):
+    for _ in range(10000):
+        if pred():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condition never came true")
+
+
+def carry_config(config, **flags):
+    config.rooms[6] = {"aliases": ["outer hall"], **flags}
+    return config
+
+
+#: status 1 held long enough for the position check (verify_after 60 s at 20 s polls)
+A_LONG_RUN = [16, 1, 1, 1, 1, 1, 4, 16]
+IN_ROOM_6 = [750, 250, 0]
+
+
+async def test_carry_in_asks_before_sending(config, events):
+    robot = FakeRobot(A_LONG_RUN, map_data=make_map(real_vac_coor=IN_ROOM_6))
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    assert job.state == "waiting"
+    assert "outer hall" in job.question.text
+    assert job.to_dict()["question"]["choices"] == ["done", "cancel"]
+    assert robot.sent == []
+    engine.answer(job.id, "done")
+    await engine.wait()
+    assert job.state == "done", job.message
+    assert job.question is None
+    assert [m for m, _ in robot.sent] == ["runCleanTask"]
+    assert {"ask", "answered", "position_ok"} <= {r["code"] for r in events.recent()}
+
+
+async def test_carry_in_cancel(config, events):
+    robot = FakeRobot(A_LONG_RUN)
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    engine.answer(job.id, "cancel")
+    await engine.wait()
+    assert job.state == "stopped"
+    assert robot.sent == []
+
+
+async def test_position_wrong_stops_the_robot(config, events):
+    robot = FakeRobot(A_LONG_RUN, map_data=make_map(real_vac_coor=[200, 200, 0]))
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    engine.answer(job.id, "done")
+    await engine.wait()
+    assert job.state == "failed"
+    assert "kjøkken" in job.message
+    assert robot.sent[-1] == ("runCleanTask", STOP)
+
+
+async def test_position_unknown_warns(config, events):
+    robot = FakeRobot(A_LONG_RUN)  # real_vac_coor [0, 0, 0], as when docked
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    engine.answer(job.id, "done")
+    await engine.wait()
+    assert job.state == "done", job.message
+    assert "position_unknown" in [r["code"] for r in events.recent()]
+
+
+async def test_carry_out_waits_for_a_human(config, events):
+    robot = FakeRobot([16, 1, 1, 4, 4, 16])
+    engine, _ = make_engine(carry_config(config, carry_out=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    assert job.question.choices == ["done"]
+    assert [m for m, _ in robot.sent] == ["runCleanTask"]
+    engine.answer(job.id, "done")
+    await engine.wait()
+    assert job.state == "done", job.message
+
+
+async def test_answer_errors(config, events):
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, FakeRobot(A_LONG_RUN))
+    with pytest.raises(AnswerError, match="no such job"):
+        engine.answer("nope", "done")
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await asyncio.sleep(0)
+    await until(lambda: job.question is not None)
+    with pytest.raises(AnswerError, match="choose one of"):
+        engine.answer(job.id, "maybe")
+    engine.answer(job.id, "cancel")
+    await engine.wait()
+    with pytest.raises(AnswerError, match="not waiting"):
+        engine.answer(job.id, "done")
+
+
+async def test_human_wait_timeout_alerts_but_keeps_waiting(config, events):
+    config.human_wait_timeout = 0.01
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, FakeRobot(A_LONG_RUN))
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    await asyncio.sleep(0.05)
+    assert job.state == "waiting"
+    assert [r["level"] for r in events.recent() if r["code"] == "ask_timeout"] == ["alert"]
+    engine.answer(job.id, "cancel")
+    await engine.wait()
+
+
+async def test_stop_while_waiting(config, events):
+    robot = FakeRobot(A_LONG_RUN)
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    await engine.stop()
+    assert job.state == "stopped"
+    assert job.question is None
+
+
+async def test_order_applied(config, events):
+    config.order = {"first": [6], "last": ["kjøkken"]}
+    robot = FakeRobot(A_RUN)
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["kitchen", "outer hall"]))
+    assert job.state == "done", job.message
+    assert [a["id"] for a in robot.sent[0][1]["area_list"]] == [6, 1]

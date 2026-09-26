@@ -21,16 +21,15 @@ from . import mapimg
 from .codes import error_text, status_text
 from .config import Config
 from .events import EventLog
-from .monitor import IdleWatch, Monitor, MonitorParams, Observation
-from .payloads import HOME, MODE_LABELS, STOP, Settings, run_payload
+from .monitor import Ask, IdleWatch, Monitor, MonitorParams, Observation
+from .payloads import HOME, STOP, run_payload
+from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
-from .rooms import Room, RoomError, RoomTable
+from .rooms import Room, RoomTable
+
+__all__ = ["AnswerError", "Busy", "Engine", "Job", "JobRequest", "PlanError"]
 
 _LOGGER = logging.getLogger(__name__)
-
-
-class PlanError(ValueError):
-    """The request can't be turned into runs (unknown or forbidden room, bad setting)."""
 
 
 class Busy(RuntimeError):
@@ -41,51 +40,36 @@ class JobFailed(Exception):
     pass
 
 
-@dataclass
-class JobRequest:
-    rooms: list[str]
-    mode: str | None = None
-    suction: int | None = None
-    water: int | None = None
-    passes: int | None = None
-    #: one run per room instead of one multi-room run
-    sequential: bool = False
-    #: allow forbidden rooms and an unlocked map
-    force: bool = False
+class JobCancelled(Exception):
+    """A human chose "cancel"."""
 
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> JobRequest:
-        known = cls.__dataclass_fields__
-        unknown = set(d) - set(known)
-        if unknown:
-            raise PlanError(f"unknown field(s): {', '.join(sorted(unknown))}")
-        if not isinstance(d.get("rooms"), list):
-            raise PlanError("rooms must be a list")
-        return cls(**d)
+
+class AnswerError(ValueError):
+    """An answer to a question that isn't asked, or a choice that isn't offered."""
 
 
 @dataclass
 class Job:
     request: JobRequest
-    runs: list[list[tuple[Room, Settings]]]
+    runs: list[Run]
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
-    state: str = "queued"  # queued, running, done, failed, stopped
+    state: str = "queued"  # queued, running, waiting (for a human), done, failed, stopped
     message: str = ""
     step: int = 0
     created: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     finished: str | None = None
+    question: Ask | None = None
+    _answer: asyncio.Future | None = field(default=None, repr=False)
 
     @property
     def active(self) -> bool:
-        return self.state in ("queued", "running")
+        return self.state in ("queued", "running", "waiting")
 
     def describe(self) -> str:
-        parts = []
-        for run in self.runs:
-            parts.append(", ".join(f"{r.label} ({MODE_LABELS[s.mode]})" for r, s in run))
-        return " | ".join(parts)
+        return " | ".join(run.describe() for run in self.runs)
 
     def to_dict(self) -> dict[str, Any]:
+        q = self.question
         return {
             "id": self.id,
             "state": self.state,
@@ -93,7 +77,8 @@ class Job:
             "step": self.step,
             "steps": len(self.runs),
             "description": self.describe(),
-            "rooms": [[r.id for r, _ in run] for run in self.runs],
+            "rooms": [[r.id for r in run.rooms] for run in self.runs],
+            "question": {"code": q.code, "text": q.text, "choices": q.choices} if q else None,
             "created": self.created,
             "finished": self.finished,
         }
@@ -121,29 +106,8 @@ class Engine:
 
     # --- planning ---
 
-    def plan(self, req: JobRequest) -> list[list[tuple[Room, Settings]]]:
-        if not req.rooms:
-            raise PlanError("no rooms given")
-        d = self.config.defaults
-        try:
-            settings = Settings(
-                mode=req.mode or d.mode,
-                suction=req.suction if req.suction is not None else d.suction,
-                water=req.water if req.water is not None else d.water,
-                passes=req.passes if req.passes is not None else d.passes,
-            )
-            rooms: list[Room] = []
-            for token in req.rooms:
-                r = self.rooms.resolve(token)
-                if r not in rooms:
-                    rooms.append(r)
-        except (RoomError, ValueError) as e:
-            raise PlanError(str(e)) from e
-        bad = [r.label for r in rooms if r.forbidden]
-        if bad and not req.force:
-            raise PlanError(f"refusing forbidden room(s) {', '.join(bad)} without force")
-        items = [(r, settings) for r in rooms]
-        return [[i] for i in items] if req.sequential else [items]
+    def plan(self, req: JobRequest) -> list[Run]:
+        return plan(req, self.rooms, self.config)
 
     # --- jobs ---
 
@@ -184,13 +148,18 @@ class Engine:
             for i, run in enumerate(job.runs):
                 job.step = i + 1
                 await self._wait_idle(job)
+                if run.carry_in:
+                    await self._carry_in(job, run.rooms[0])
                 await self._send(job, run)
-                await self._follow(job)
+                await self._follow(job, run)
             job.state = "done"
             self._emit("info", f"job {job.id} done", "job_done", job)
         except asyncio.CancelledError:
             job.state = "stopped"
             self._emit("warn", f"job {job.id} stopped", "job_stopped", job)
+        except JobCancelled as e:
+            job.state, job.message = "stopped", str(e)
+            self._emit("warn", f"job {job.id} stopped: {e}", "job_stopped", job)
         except (RobotError, JobFailed) as e:
             job.state, job.message = "failed", str(e)
             self._emit("error", f"job {job.id} failed: {e}", "job_failed", job)
@@ -199,7 +168,61 @@ class Engine:
             job.state, job.message = "failed", f"{type(e).__name__}: {e}"
             self._emit("error", f"job {job.id} failed: {job.message}", "job_failed", job)
         finally:
+            job.question = job._answer = None
             job.finished = datetime.now(UTC).isoformat(timespec="seconds")
+
+    # --- humans ---
+
+    async def ask(self, job: Job, q: Ask) -> str:
+        """Put `q` to a human and wait for the answer, however long it takes.
+
+        After `human_wait_timeout` an alert says nobody has answered; the job
+        keeps waiting and never goes on by itself.  `stop` ends the wait.
+        """
+        job.question, job._answer = q, asyncio.get_running_loop().create_future()
+        job.state = "waiting"
+        self._emit("alert", f"{q.text} — waiting for: {' / '.join(q.choices)}", "ask", job)
+        try:
+            try:
+                return await asyncio.wait_for(asyncio.shield(job._answer), self.config.human_wait_timeout)
+            except TimeoutError:
+                self._emit("alert", f"nobody has answered: {q.text}", "ask_timeout", job)
+                return await job._answer
+        finally:
+            job.question = job._answer = None
+            job.state = "running"
+
+    def answer(self, job_id: str, choice: str) -> None:
+        job = self.jobs.get(job_id)
+        if job is None:
+            raise AnswerError("no such job")
+        if job.question is None or job._answer is None or job._answer.done():
+            raise AnswerError(f"job {job_id} is not waiting for an answer")
+        if choice not in job.question.choices:
+            raise AnswerError(f"choose one of: {', '.join(job.question.choices)}")
+        fut, job.question, job.state = job._answer, None, "running"
+        self._emit("info", f"answered: {choice}", "answered", job)
+        fut.set_result(choice)
+
+    async def _carry_in(self, job: Job, room: Room) -> None:
+        q = Ask("carry_in", f"carry the robot into {room.label} and put it down", ["done", "cancel"])
+        if await self.ask(job, q) == "cancel":
+            raise JobCancelled(f"{room.label} cancelled")
+
+    async def _verify_position(self, job: Job, room: Room) -> None:
+        """After a carry-in: is the robot where it was put?  Wrong = stop, before it cleans by a wrong map."""
+        md = await self.robot.map_data()
+        xy = (md.get("real_vac_coor") or [0, 0])[:2]
+        near = mapimg.rooms_near(md, xy) if any(xy) else set()
+        if room.id in near:
+            self._emit("info", f"position checked: in {room.label}", "position_ok", job)
+            return
+        if not near:
+            self._emit("warn", f"could not check the position ({xy}); is it in {room.label}?", "position_unknown", job)
+            return
+        where = ", ".join(sorted(self.rooms.label_of(r) for r in near))
+        await self.robot.send("runCleanTask", STOP)
+        raise JobFailed(f"the robot thinks it is in {where}, not {room.label} — stopped; check it in the app")
 
     async def _preflight(self, job: Job) -> None:
         info = await self.robot.map_info()
@@ -249,14 +272,18 @@ class Engine:
                 told = True
             await self.sleep(self.config.poll_interval)
 
-    async def _send(self, job: Job, run: list[tuple[Room, Settings]]) -> None:
-        payload = run_payload([(r.id, s) for r, s in run])
-        desc = ", ".join(r.label for r, _ in run)
+    async def _send(self, job: Job, run: Run) -> None:
+        payload = run_payload([(r.id, s) for r, s in run.items])
+        desc = ", ".join(r.label for r in run.rooms)
         self._emit("info", f"step {job.step}/{len(job.runs)}: sending {desc}", "send", job)
         await self.robot.send("runCleanTask", payload)
 
-    async def _follow(self, job: Job) -> None:
-        m = Monitor(sent_at=self.clock(), params=self.params)
+    async def _follow(self, job: Job, run: Run) -> None:
+        room = run.rooms[0]
+        m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out)
+        #: after a carry-in: when the robot has been cleaning, not relocating, since then
+        verify: float | None = None
+        check = run.carry_in
         while True:
             await self.sleep(self.config.poll_interval)
             try:
@@ -271,6 +298,20 @@ class Engine:
                 return
             if m.phase == "failed":
                 raise JobFailed(m.message)
+            if m.ask:
+                await self.ask(job, m.ask)
+                m.ask = None
+                m.resumed()
+                check, verify = run.carry_in, None
+                continue
+            if check:
+                if o.status != 1 or o.relocating:
+                    verify = None
+                elif verify is None:
+                    verify = o.t
+                elif o.t - verify >= self.config.verify_after:
+                    check = False
+                    await self._verify_position(job, room)
 
     # --- direct commands ---
 
@@ -282,6 +323,7 @@ class Engine:
                 await self._task
         if self.job is not None and self.job.active:  # cancelled before it got going
             self.job.state = "stopped"
+            self.job.question = self.job._answer = None
             self.job.finished = datetime.now(UTC).isoformat(timespec="seconds")
         await self.robot.send("runCleanTask", STOP)
         self._emit("warn", "stop sent", "stop")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,8 +32,11 @@ class Config:
     timeout: int = 30
     timezone: str | None = None
     defaults: Defaults = field(default_factory=Defaults)
-    #: keyed by robot room name or id, values like {"aliases": [...], "forbidden": True}
+    #: keyed by robot room name or id, values like {"aliases": [...], "forbidden": True};
+    #: flags: forbidden, carry_in, carry_out
     rooms: dict[int | str, dict[str, Any]] = field(default_factory=dict)
+    #: {"first": [rooms], "last": [rooms]}: the order of rooms within a run
+    order: dict[str, list[int | str]] = field(default_factory=dict)
     presets: list[dict[str, Any]] = field(default_factory=list)
     listen: str = "127.0.0.1:8765"
     daemon_url: str | None = None
@@ -48,6 +52,10 @@ class Config:
     gave_up_after: float = 300
     #: how long to wait for the robot to become idle before sending a run
     idle_timeout: float = 900
+    #: after this long without an answer, a question to a human raises an alert (and keeps waiting)
+    human_wait_timeout: float = 900
+    #: after a carry-in, the robot must be cleaning, not relocating, this long before its position is checked
+    verify_after: float = 60
 
     def __post_init__(self) -> None:
         if self.daemon_url is None:
@@ -85,9 +93,27 @@ class Config:
                 kw[key] = Path(d.pop(key)).expanduser()
         monitor = d.pop("monitor", None) or {}
         kw.update(monitor)
-        # home rules for later milestones (order, waypoints, ...) are accepted and ignored for now
+        # waypoints (milestone 5) and notify (6) are accepted and ignored for now
         kw.update({k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        for key in DURATIONS:
+            if key in kw:
+                kw[key] = parse_duration(kw[key])
         return cls(**kw)
+
+
+DURATIONS = ("poll_interval", "settle", "start_timeout", "gave_up_after", "idle_timeout")
+DURATIONS += ("human_wait_timeout", "verify_after")
+_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
+
+
+def parse_duration(v: float | str) -> float:
+    """Seconds, from a number or a string like "90s", "15m", "1h"."""
+    if isinstance(v, int | float):
+        return v
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([smh]?)\s*", str(v))
+    if not m:
+        raise ValueError(f"bad duration {v!r} (expected e.g. 90, 90s, 15m, 1h)")
+    return float(m[1]) * _UNITS[m[2]]
 
 
 def load_config(path: str | Path | None = None) -> Config:

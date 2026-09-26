@@ -47,3 +47,14 @@ def test_credentials_env(monkeypatch):
 def test_paths_expanded():
     c = Config.from_dict({"cache_dir": "~/x"})
     assert c.cache_dir == Path.home() / "x"
+
+
+def test_durations_and_order():
+    c = Config.from_dict(
+        {"human_wait_timeout": "15m", "monitor": {"settle": "90s", "gave_up_after": 300}, "order": {"first": [6]}}
+    )
+    assert c.human_wait_timeout == 900
+    assert c.settle == 90
+    assert c.gave_up_after == 300
+    assert c.order == {"first": [6]}
+    assert Config.from_dict({"human_wait_timeout": "1h"}).human_wait_timeout == 3600

@@ -28,6 +28,9 @@
   #status .big { font-size: 1.3rem; font-weight: 600; }
   #status .sub { color: var(--muted); }
   #job { margin-top: 6px; }
+  #question { margin-top: 10px; padding: 10px; border: 2px solid var(--alert); border-radius: 8px; }
+  #qtext { font-weight: 600; font-size: 1.1rem; }
+  #qchoices button.primary { margin-top: 8px; }
   #msg { color: var(--alert); min-height: 1.2em; margin-top: 6px; }
   #log { list-style: none; margin: 0; padding: 0; max-height: 18rem; overflow-y: auto; font-size: .9rem; }
   #log li { padding: 3px 0; border-bottom: 1px solid var(--line); }
@@ -45,6 +48,10 @@
     <div class="big" id="state">…</div>
     <div class="sub" id="details"></div>
     <div id="job"></div>
+    <div id="question" hidden>
+      <div id="qtext"></div>
+      <div class="modes" id="qchoices"></div>
+    </div>
     <div id="msg"></div>
   </section>
 

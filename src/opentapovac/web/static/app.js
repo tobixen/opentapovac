@@ -32,11 +32,13 @@ async function loadRooms() {
   timezone = d.timezone || undefined;
   mode = d.default_mode;
   $("rooms").replaceChildren(...d.rooms.filter((r) => !r.forbidden).map((r) => {
-    const b = button(r.label, () => {
+    const carry = r.carry_in || r.carry_out;
+    const b = button(r.label + (carry ? " ✋" : ""), () => {
       selected.has(b.dataset.id) ? selected.delete(b.dataset.id) : selected.add(b.dataset.id);
       refreshSelection();
     });
     b.dataset.id = String(r.id);
+    if (carry) b.title = "someone has to carry the robot " + (r.carry_in ? "in" : "out");
     return b;
   }));
   $("presets").replaceChildren(...d.presets.map((p) => button(p.label, () => start(p.rooms.map(String), p.mode))));
@@ -67,7 +69,8 @@ async function loadStatus() {
     if (s.relocating) bits.push("relocating");
     $("details").textContent = bits.join(" · ");
     const j = s.job;
-    busy = !!j && (j.state === "queued" || j.state === "running");
+    busy = !!j && ["queued", "running", "waiting"].includes(j.state);
+    showQuestion(j);
     $("job").textContent = j ? `Job: ${j.description} — ${j.state}` + (j.steps > 1 ? ` (step ${j.step}/${j.steps})` : "")
                                + (j.message ? `: ${j.message}` : "") : "";
   } catch (e) {
@@ -75,6 +78,17 @@ async function loadStatus() {
     $("details").textContent = e.message;
   }
   refreshSelection();
+}
+
+function showQuestion(j) {
+  const q = j && j.question;
+  $("question").hidden = !q;
+  if (!q) return;
+  $("qtext").textContent = q.text;
+  $("qchoices").replaceChildren(...q.choices.map((c) => button(c, async () => {
+    try { await api("POST", `/jobs/${j.id}/answer`, {choice: c}); } catch (e) { say(e.message); }
+    loadStatus();
+  }, c === "cancel" ? "" : "primary")));
 }
 
 function fmt(t) {

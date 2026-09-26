@@ -13,7 +13,7 @@ from importlib.resources import files
 from aiohttp import web
 
 from .. import __version__
-from ..engine import Busy, Engine, JobRequest, PlanError
+from ..engine import AnswerError, Busy, Engine, JobRequest, PlanError
 from ..payloads import MODE_LABELS
 from ..robot import RobotError
 
@@ -30,7 +30,7 @@ def _error(status: int, msg: str) -> web.Response:
 async def errors(request: web.Request, handler):
     try:
         return await handler(request)
-    except PlanError as e:
+    except (PlanError, AnswerError) as e:
         return _error(400, str(e))
     except Busy as e:
         return _error(409, str(e))
@@ -79,7 +79,10 @@ async def rooms_refresh(request: web.Request) -> web.Response:
 def _rooms(engine: Engine) -> dict:
     c = engine.config
     return {
-        "rooms": [{"id": r.id, "label": r.label, "forbidden": r.forbidden} for r in engine.rooms],
+        "rooms": [
+            {"id": r.id, "label": r.label, "forbidden": r.forbidden, "carry_in": r.carry_in, "carry_out": r.carry_out}
+            for r in engine.rooms
+        ],
         "presets": c.presets,
         "modes": MODE_LABELS,
         "default_mode": c.defaults.mode,
@@ -105,6 +108,22 @@ async def get_job(request: web.Request) -> web.Response:
     if job is None:
         return _error(404, "no such job")
     return web.json_response(job.to_dict())
+
+
+@routes.post("/jobs/{id}/answer")
+async def answer(request: web.Request) -> web.Response:
+    engine = request.app[ENGINE]
+    job_id = request.match_info["id"]
+    if job_id not in engine.jobs:
+        return _error(404, "no such job")
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return _error(400, "body must be JSON")
+    if not isinstance(body, dict) or not isinstance(body.get("choice"), str):
+        return _error(400, 'body must be {"choice": "..."}')
+    engine.answer(job_id, body["choice"])
+    return web.json_response(engine.jobs[job_id].to_dict())
 
 
 @routes.post("/stop")

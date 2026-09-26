@@ -26,10 +26,11 @@ handling of "dock not found".
 
 ## Status
 
-Early.  The command-line tool, the daemon and the web page exist
-(milestones 1–3 in [docs/design.md](docs/design.md)), but have not yet
-cleaned a room on their own; the home rules (room order, carrying the
-robot, recovery) are still to come.  Background and protocol notes are
+Early.  The command-line tool, the daemon, the web page and the home
+rules (room order, carrying the robot, a position check after carrying)
+exist (milestones 1–4 in [docs/design.md](docs/design.md)), but have not
+yet cleaned a room on their own; recovery when the dock is not found is
+still to come.  Background and protocol notes are
 in [docs/](docs/).
 
 ## Installation
@@ -60,9 +61,13 @@ rooms:                       # keyed by the robot's room name or id
   "kjøkken": {aliases: [kitchen]}
   6: {aliases: [outer hall]}
   stairs: {forbidden: true}  # refused without --force
+  "bedroom 2": {carry_in: true}    # can't get in by itself
+  "living room": {carry_out: true} # can't get out by itself
+order: {first: ["bedroom 1", 6], last: ["kjøkken"]}  # within a run
 presets:
   - {label: "Halls + kitchen", rooms: [5, 6, "kjøkken"]}
 listen: 127.0.0.1:8765       # the daemon
+human_wait_timeout: 15m      # then an alert; it keeps waiting
 ```
 
 Room names come from the robot; `opentapovac rooms --refresh` reads them.
@@ -78,6 +83,7 @@ list of options.
 opentapovac clean kitchen "outer hall"      # one run, rooms in this order
 opentapovac clean --mop --sequential hall 6 # one run per room
 opentapovac status | stop | rooms | log
+opentapovac answer done                     # "carry the robot into ..."
 opentapovac map map.png                     # map with the last track
 opentapovac serve                           # the daemon and the web page
 ```
@@ -90,6 +96,15 @@ water tank).  With a daemon running, every command goes through it and
 The daemon binds to localhost.  To reach the web page from phones, put a
 reverse proxy with authentication in front of it; the daemon has no
 accounts of its own.
+
+A carry room gets a run of its own, before the others.  For a
+`carry_in` room the job asks someone to carry the robot in before it
+starts, checks a minute into the run that the robot knows where it is
+(and stops it if it thinks it is in another room), and asks again if it
+comes back out mid-run.  For a `carry_out` room it asks each time the
+robot heads for the dock.  The question shows on the web page, on the
+terminal of a standalone or `--wait` clean, and in `opentapovac status`;
+the job waits until someone answers or stops it.
 
 Before a run the robot's map must be locked and "auto change map" off,
 since a bad relocation can otherwise overwrite the map; `--force` skips

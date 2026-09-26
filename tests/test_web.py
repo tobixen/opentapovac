@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -37,7 +38,7 @@ async def test_index(make_client):
 async def test_rooms_and_presets(make_client):
     client, _, _ = await make_client()
     data = await (await client.get("/rooms")).json()
-    assert {"id": 6, "label": "outer hall", "forbidden": False} in data["rooms"]
+    assert {"id": 6, "label": "outer hall", "forbidden": False, "carry_in": False, "carry_out": False} in data["rooms"]
     assert data["presets"][0]["label"] == "Kitchen + outer hall"
     assert data["default_mode"] == "vac_then_mop"
     assert "vac" in data["modes"]
@@ -118,3 +119,31 @@ async def test_daemon_client_not_running():
     dc = DaemonClient("http://127.0.0.1:9")
     assert not await dc.ping()
     await dc.close()
+
+
+async def test_answer(make_client, config):
+    config.rooms[6] = {"aliases": ["outer hall"], "carry_in": True}
+    client, engine, robot = await make_client(statuses=(16, 1, 4, 16))
+    job = await (await client.post("/jobs", json={"rooms": ["outer hall"]})).json()
+    for _ in range(1000):
+        if engine.job.question:
+            break
+        await asyncio.sleep(0)
+    got = await (await client.get(f"/jobs/{job['id']}")).json()
+    assert got["state"] == "waiting"
+    assert got["question"]["choices"] == ["done", "cancel"]
+    assert (await client.post(f"/jobs/{job['id']}/answer", json={"choice": "maybe"})).status == 400
+    assert (await client.post("/jobs/nope/answer", json={"choice": "done"})).status == 404
+    assert (await client.post(f"/jobs/{job['id']}/answer", json={"choice": "cancel"})).status == 200
+    await engine.wait()
+    assert engine.job.state == "stopped"
+    await client.close()
+
+
+async def test_rooms_carry_flags(make_client, config):
+    config.rooms[6] = {"aliases": ["outer hall"], "carry_out": True}
+    client, _, _ = await make_client()
+    data = await (await client.get("/rooms")).json()
+    [r6] = [r for r in data["rooms"] if r["id"] == 6]
+    assert (r6["carry_in"], r6["carry_out"]) == (False, True)
+    await client.close()

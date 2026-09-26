@@ -4,7 +4,7 @@ Replaces the old spec `tapo-clean-spec.md`
 ("tapo-clean"), which is still the reference for payloads, status
 codes, pitfalls and the robot tests.  This document only covers what
 changes: a daemon, a web UI for the family, and the home-specific
-logic.  Milestones 1–3 are built (2026-09-26), see §9; none of it has
+logic.  Milestones 1–4 are built (2026-09-26), see §9; none of it has
 cleaned a room yet.
 
 ## 0. Arguments against, read first
@@ -245,7 +245,7 @@ spec still gate the features that depend on them.
 6. Notifications, deployment (NixOS module / puppet), router WireGuard
    as client.  Host not chosen yet.
 
-State 2026-09-26: 1–3 are written and tested against a scripted robot and
+State 2026-09-26: 1–4 are written and tested against a scripted robot and
 the recorded 2026-09-24 evening log; read-only calls (status, rooms, map)
 were checked against the real robot.  No run has been sent by it yet.
 Where the build differs from the text above:
@@ -262,7 +262,25 @@ Where the build differs from the text above:
   by itself afterwards.  **Home** (`setSwitchCharge`) is from the app and
   not yet sent; the web page has no button for it.
 * The web page selects rooms and then starts; the presets start at once.
-* `POST /jobs/{id}/answer` waits for milestone 4: nothing asks a human yet.
+* **Carry rooms go first**: each gets a run of its own, before the
+  multi-room run, since whoever pressed the button is most likely still
+  around.
+* **No pause**: `setRobotPause` is untried, so nothing is paused.  In a
+  `carry_out` run, "going home" (status 4 or `recharge_status` 1) raises
+  the question once per trip; the robot is left to stop at the doorstep
+  by itself (err 21).  In a `carry_in` run the question comes before the
+  send, and again each time the robot leaves the base mid-run (after a
+  mop wash, say): it can't climb back in either.  The engine does not
+  poll while it waits for the answer.
+* **VerifyPosition is not a step of its own**: `real_vac_coor` reads
+  (0, 0) while docked, so the check is made during the run, once the robot
+  has been cleaning, not relocating, for `verify_after` (60 s) after a
+  carry-in.  Any pixel of the room within 15 cm of the position passes;
+  another room's pixels stop the run (the app's stop payload) and fail the
+  job; no room at all (wall, (0, 0)) is only a warning.
+* **Human wait timeout** raises an alert and keeps waiting; the job is
+  "waiting" until answered or stopped.  `opentapovac answer`, the web
+  page, and the terminal of a standalone or `--wait` clean all answer.
 * Extra endpoints: `GET /ping`, `GET /rooms`, `POST /rooms/refresh`.
 
 ## 10. Decisions (2026-09-26)

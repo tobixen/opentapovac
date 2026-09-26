@@ -17,3 +17,8 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   it when it answers and run standalone when it doesn't.
 - A web page for day-to-day runs: room and preset buttons, mode, stop,
   status, event log and map.
+- Home rules from the config: room order within a run (`order.first`,
+  `order.last`), and carry rooms (`carry_in`, `carry_out`) that get their
+  own run and ask a human to carry the robot, with a position check
+  after carrying it in.  Answers come from the web page, the terminal, or
+  `opentapovac answer`.

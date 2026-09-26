@@ -8,6 +8,13 @@ spec, both from that log:
   enough: after a run the robot showed 5 for ~30 s before washing the mop.
 * Standby with err 21 (dock not found) is not the end: the robot retried by
   itself ~90 s later, twice.  It counts as given up after `gave_up_after`.
+
+Carry rooms (docs/design.md §3) are one room per run, so the monitor knows
+where the robot is without a position: in a `carry_out` run, heading home
+means leaving the room; in a `carry_in` run, leaving the base means heading
+for the room.  Either way it raises a question (`ask`) for the engine to put
+to a human.  The robot is not paused meanwhile: `setRobotPause` has not been
+tried yet.  It stops at the doorstep by itself (err 21 on the way out).
 """
 
 from __future__ import annotations
@@ -21,6 +28,10 @@ LEFT_DOCK = {1, 4}  # cleaning, going home
 STARTED = {1, 4, 15, 17}  # 15/17: mop washing/fitting at the start of a mop pass
 CHARGING = {5, 6}
 DRYING = 16
+#: in or at the base: charging, emptying dust, mop washing/fitting/removing, cutting hair, drying
+AT_BASE = {5, 6, 9, 15, 16, 17, 18, 19}
+GOING_HOME = 4
+CLEANING = 1
 
 
 @dataclass(frozen=True)
@@ -30,17 +41,21 @@ class Observation:
     errors: tuple[int, ...] = ()
     relocating: bool | None = None
     mapping: bool | None = None
+    #: `getCleanStatus.recharge_status` 1: it wants the dock (mop wash, battery, end of run)
+    recharging: bool | None = None
 
     @classmethod
     def from_replies(cls, t: float, vac: dict[str, Any], clean: dict[str, Any] | None = None) -> Observation:
         err = vac.get("err_status") or []
         clean = clean or {}
+        rs = clean.get("recharge_status")
         return cls(
             t=t,
             status=vac.get("status"),
             errors=tuple(err) if isinstance(err, list) else (err,),
             relocating=clean.get("is_relocating"),
             mapping=clean.get("is_mapping"),
+            recharging=None if rs is None else rs == 1,
         )
 
 
@@ -49,6 +64,15 @@ class Event:
     level: str  # info, warn, alert (needs a human), error
     code: str
     msg: str
+
+
+@dataclass(frozen=True)
+class Ask:
+    """A question for a human; the engine waits for one of `choices`."""
+
+    code: str
+    text: str
+    choices: list[str]
 
 
 @dataclass(frozen=True)
@@ -91,13 +115,30 @@ ERROR_LEVELS = {
 
 
 class Monitor:
-    """phase: starting -> running -> done | failed."""
+    """phase: starting -> running -> done | failed.
 
-    def __init__(self, sent_at: float, params: MonitorParams):
+    After a `step`, `ask` may hold a question.  The caller clears it once
+    answered and calls `resumed()`.
+    """
+
+    def __init__(
+        self,
+        sent_at: float,
+        params: MonitorParams,
+        room: str | None = None,
+        carry_in: bool = False,
+        carry_out: bool = False,
+    ):
         self.sent_at = sent_at
         self.p = params
+        self.room, self.carry_in, self.carry_out = room, carry_in, carry_out
         self.phase = "starting"
         self.message = ""
+        self.ask: Ask | None = None
+        # carry_out: ask on the next trip home; armed once it is out cleaning, since
+        # recharge_status reads 1 while it washes the mop at the start of a run
+        self._out_armed = False
+        self._at_base = False  # carry_in: ask when it next leaves the base
         self._left_dock = False
         self._status: int | None = None
         self._errors: tuple[int, ...] = ()
@@ -150,10 +191,36 @@ class Monitor:
                 return ev + self._fail(f"robot gave up ({why})")
         else:
             self._standby_since = None
+        ev += self._carry(o)
         if self._idle.feed(o) and self._left_dock:
             self.phase = "done"
             ev.append(Event("info", "done", "run finished, robot is back on the dock"))
         return ev
+
+    def _carry(self, o: Observation) -> list[Event]:
+        if self.carry_out:
+            if o.status == GOING_HOME or (o.recharging and o.status not in AT_BASE):
+                if self._out_armed:
+                    self._out_armed = False
+                    return self._ask("carry_out", f"the robot wants to go home: carry it out of {self.room}", ["done"])
+            elif o.status == CLEANING:
+                self._out_armed = True
+        if self.carry_in:
+            if o.status in AT_BASE:
+                self._at_base = True
+            elif o.status == CLEANING and self._at_base:
+                self._at_base = False
+                return self._ask("carry_in", f"the robot is on its way back: carry it into {self.room}", ["done"])
+        return []
+
+    def _ask(self, code: str, text: str, choices: list[str]) -> list[Event]:
+        self.ask = Ask(code, text, choices)
+        return [Event("alert", code, text + ", then press " + " or ".join(choices))]
+
+    def resumed(self) -> None:
+        """A human answered: time spent waiting doesn't count as standby or settling."""
+        self._standby_since = None
+        self._idle = IdleWatch(self.p.settle)
 
     def _fail(self, msg: str) -> list[Event]:
         self.phase, self.message = "failed", msg

@@ -24,6 +24,10 @@ class Room:
     name: str | None = None
     aliases: list[str] = field(default_factory=list)
     forbidden: bool = False
+    #: the robot can't get in by itself: a human carries it in
+    carry_in: bool = False
+    #: the robot can't get out by itself: a human carries it out
+    carry_out: bool = False
 
     @property
     def label(self) -> str:
@@ -36,7 +40,8 @@ class RoomTable:
         self._rooms: list[Room] = []
         for rid, name in rooms:
             conf = room_config.get(rid) or room_config.get(str(rid)) or (room_config.get(name) if name else None) or {}
-            self._rooms.append(Room(rid, name, list(conf.get("aliases", [])), bool(conf.get("forbidden", False))))
+            flags = {k: bool(conf.get(k, False)) for k in ("forbidden", "carry_in", "carry_out")}
+            self._rooms.append(Room(rid, name, list(conf.get("aliases", [])), **flags))
 
     @classmethod
     def from_map(cls, map_data: dict[str, Any], room_config: dict[int | str, dict[str, Any]]) -> RoomTable:
@@ -73,6 +78,12 @@ class RoomTable:
                 return r
         known = ", ".join(self.completions())
         raise RoomError(f"unknown room {token!r} (known: {known or 'none, refresh the rooms'})")
+
+    def label_of(self, room_id: int) -> str:
+        for r in self._rooms:
+            if r.id == room_id:
+                return r.label
+        return str(room_id)
 
     def completions(self) -> list[str]:
         out = []

@@ -15,8 +15,9 @@ import asyncio
 import contextlib
 import fcntl
 import logging
+import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ import argcomplete
 from . import __version__, mapimg
 from .client import DaemonClient, DaemonError
 from .config import Config, load_config, load_credentials
-from .engine import Busy, Engine, JobRequest, PlanError
+from .engine import AnswerError, Busy, Engine, JobRequest, PlanError
 from .events import EventLog, format_record
 from .payloads import MODES
 from .robot import KasaRobot, RobotError
@@ -34,6 +35,7 @@ from .rooms import RoomTable
 
 MODE_FLAGS = {m: "--" + m.replace("_", "-") for m in MODES}
 EXIT = {"done": 0, "failed": 1, "stopped": 3}
+JOB_END = ("job_done", "job_failed", "job_stopped")
 
 
 class CliError(Exception):
@@ -71,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--force", action="store_true", help="allow forbidden rooms and an unlocked map")
     c.add_argument("--wait", action="store_true", help="with a daemon: follow the job until it ends")
 
+    a = sub.add_parser(
+        "answer",
+        help="answer the robot's question (carry it, ...)",
+        description="Answer the current job's question; without CHOICE, show it.",
+    )
+    a.add_argument("choice", nargs="?", help="one of the offered choices (a unique prefix will do)")
     sub.add_parser("status", help="robot status")
     sub.add_parser("stop", help="stop the current run")
     sub.add_parser("home", help="send the robot to the dock (setSwitchCharge, not yet verified)")
@@ -142,6 +150,97 @@ async def local_engine(config: Config, verbose_events: bool = True):
             await robot.close()
 
 
+def parse_choice(line: str, choices: list[str]) -> str | None:
+    """The choice `line` names: exactly, or by a unique prefix, ignoring case."""
+    t = line.strip().casefold()
+    if not t:
+        return None
+    if t in choices:
+        return t
+    hits = [c for c in choices if c.casefold().startswith(t)]
+    return hits[0] if len(hits) == 1 else None
+
+
+#: bytes read from stdin past the last line handed out
+_stdin_rest = bytearray()
+
+
+async def read_line(prompt: str) -> str | None:
+    """A line from stdin without blocking the event loop; None on EOF or without a usable stdin.
+
+    Reads the file descriptor itself: `sys.stdin.readline()` would buffer any
+    further lines where the event loop can't see them.
+    """
+    print(prompt, end="", flush=True)
+    loop = asyncio.get_running_loop()
+    try:
+        fd = sys.stdin.fileno()
+    except (ValueError, OSError, AttributeError):
+        return None
+    while b"\n" not in _stdin_rest:
+        fut: asyncio.Future[bytes] = loop.create_future()
+        try:
+            loop.add_reader(fd, lambda f=fut: f.done() or f.set_result(os.read(fd, 4096)))
+        except (ValueError, OSError, NotImplementedError):
+            return None
+        try:
+            chunk = await fut
+        finally:
+            loop.remove_reader(fd)
+        if not chunk:
+            return None
+        _stdin_rest.extend(chunk)
+    line, _, rest = bytes(_stdin_rest).partition(b"\n")
+    _stdin_rest[:] = rest
+    return line.decode(errors="replace")
+
+
+class TerminalAsker:
+    """Puts a job's questions to the terminal, fed with its events.
+
+    An answer given elsewhere (the web page) cancels the prompt.
+    """
+
+    def __init__(
+        self,
+        fetch: Callable[[str], Awaitable[dict[str, Any] | None]],
+        send: Callable[[str, str], Awaitable[Any]],
+    ):
+        self.fetch, self.send = fetch, send
+        self._task: asyncio.Task | None = None
+
+    def feed(self, rec: dict[str, Any]) -> None:
+        code = rec.get("code")
+        if code == "ask" and rec.get("job"):
+            self.cancel()
+            self._task = asyncio.get_running_loop().create_task(self._ask(rec["job"]))
+        elif code == "answered" or code in JOB_END:
+            self.cancel()
+
+    def cancel(self) -> None:
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    async def _ask(self, job_id: str) -> None:
+        q = await self.fetch(job_id)
+        if not q:
+            return
+        while True:
+            line = await read_line(f"{q['text']} [{'/'.join(q['choices'])}]: ")
+            if line is None:
+                print("\n(no terminal to answer on: use `opentapovac answer` or the web page)", file=sys.stderr)
+                return
+            choice = parse_choice(line, q["choices"])
+            if choice:
+                break
+        self._task = None  # the "answered" event must not cancel the task sending it
+        try:
+            await self.send(job_id, choice)
+        except (AnswerError, DaemonError) as e:
+            print(f"opentapovac: {e}", file=sys.stderr)
+
+
 def print_status(st: dict[str, Any]) -> None:
     line = st["status_text"]
     if st["errors"]:
@@ -164,11 +263,15 @@ def print_job(j: dict[str, Any]) -> None:
     if j["message"]:
         line += f": {j['message']}"
     print(line)
+    if j.get("question"):
+        q = j["question"]
+        print(f"question: {q['text']} [{'/'.join(q['choices'])}] — `opentapovac answer CHOICE`")
 
 
 def print_rooms(rooms: list[dict[str, Any]]) -> None:
     for r in rooms:
-        print(f"{r['id']:>3}  {r['label']}" + ("  (forbidden)" if r["forbidden"] else ""))
+        flags = [f for f in ("forbidden", "carry_in", "carry_out") if r.get(f)]
+        print(f"{r['id']:>3}  {r['label']}" + (f"  ({', '.join(flags)})" if flags else ""))
 
 
 async def via_daemon(args: argparse.Namespace, config: Config, dc: DaemonClient) -> int:
@@ -178,13 +281,25 @@ async def via_daemon(args: argparse.Namespace, config: Config, dc: DaemonClient)
         print_job(job)
         if not args.wait:
             return 0
-        async for rec in dc.events():
-            if rec.get("job") == job["id"]:
-                echo(rec, config)
-                if rec.get("code") in ("job_done", "job_failed", "job_stopped"):
-                    break
+
+        async def question(job_id: str) -> dict[str, Any] | None:
+            return (await dc.job(job_id))["question"]
+
+        asker = TerminalAsker(question, dc.answer)
+        try:
+            # with a backlog: the job may have moved on (or asked) before we got here
+            async for rec in dc.events(backlog=200):
+                if rec.get("job") == job["id"]:
+                    echo(rec, config)
+                    asker.feed(rec)
+                    if rec.get("code") in JOB_END:
+                        break
+        finally:
+            asker.cancel()
         job = await dc.job(job["id"])
         return EXIT.get(job["state"], 1)
+    if cmd == "answer":
+        return await answer(args, dc)
     if cmd == "status":
         print_status(await dc.status())
     elif cmd == "stop":
@@ -201,13 +316,42 @@ async def via_daemon(args: argparse.Namespace, config: Config, dc: DaemonClient)
     return 0
 
 
+async def answer(args: argparse.Namespace, dc: DaemonClient) -> int:
+    job = (await dc.status())["job"]
+    q = job and job["question"]
+    if not q:
+        raise CliError("no question to answer")
+    if args.choice is None:
+        print(f"{q['text']} [{'/'.join(q['choices'])}]")
+        return 0
+    choice = parse_choice(args.choice, q["choices"])
+    if choice is None:
+        raise CliError(f"choose one of: {', '.join(q['choices'])}")
+    print_job(await dc.answer(job["id"], choice))
+    return 0
+
+
 async def standalone(args: argparse.Namespace, config: Config) -> int:
     cmd = args.command
-    if cmd == "log" and args.follow:
-        raise CliError(f"log --follow needs the daemon ({config.daemon_url} does not answer)")
+    if cmd in ("log", "answer") and (cmd == "answer" or args.follow):
+        raise CliError(
+            f"{cmd} needs the daemon ({config.daemon_url} does not answer); a standalone clean asks on its own terminal"
+        )
     async with local_engine(config, verbose_events=cmd == "clean") as engine:
         if cmd == "clean":
-            job = await engine.run(request_from_args(args))
+
+            async def question(job_id: str) -> dict[str, Any] | None:
+                return engine.jobs[job_id].to_dict()["question"]
+
+            async def send(job_id: str, choice: str) -> None:
+                engine.answer(job_id, choice)
+
+            asker = TerminalAsker(question, send)
+            engine.events.add_listener(asker.feed)
+            try:
+                job = await engine.run(request_from_args(args))
+            finally:
+                asker.cancel()
             print_job(job.to_dict())
             return EXIT.get(job.state, 1)
         if cmd == "status":
@@ -219,7 +363,7 @@ async def standalone(args: argparse.Namespace, config: Config) -> int:
         elif cmd == "rooms":
             if args.refresh or not len(engine.rooms):
                 await engine.refresh_rooms()
-            print_rooms([{"id": r.id, "label": r.label, "forbidden": r.forbidden} for r in engine.rooms])
+            print_rooms([asdict(r) | {"label": r.label} for r in engine.rooms])
         elif cmd == "map":
             Path(args.out).write_bytes(await engine.map_png(refresh=True))
         elif cmd == "serve":
