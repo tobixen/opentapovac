@@ -47,6 +47,23 @@ make install
 Tab completion for bash and zsh comes with it; bash needs the
 `bash-completion` package.
 
+### NixOS
+
+`nix/package.nix` builds the package (with python-kasa pinned to the TPAP
+branch) and `nix/module.nix` runs the daemon as `services.opentapovac`:
+
+```nix
+imports = [ "${opentapovac-src}/nix/module.nix" ];
+services.opentapovac = {
+  enable = true;
+  credentialsFile = "/etc/opentapovac/credentials.yaml";  # user: / pass:
+  settings = { robot.host = "192.0.2.10"; timezone = "Europe/Oslo"; };
+};
+```
+
+`settings` is the config file below, as Nix.  The daemon binds to
+localhost; put nginx with authentication in front of it.
+
 ## Configuration
 
 `~/.config/opentapovac/config.yaml`; the account password stays in

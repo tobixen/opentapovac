@@ -25,3 +25,4 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 - The daemon keeps the robot's track and its clean records (time, area,
   mop washes) before the robot forgets them, also for runs started from
   the app; the map shows the recorded track of the last run.
+- A Nix package and a NixOS module (`services.opentapovac`).
