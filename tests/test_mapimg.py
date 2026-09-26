@@ -61,3 +61,12 @@ def test_track_points_header_only_from_the_start():
 def test_render_with_saved_tracks():
     plain = render(make_map()).tobytes()
     assert render(make_map(), tracks=[[(100, 100), (800, 100)], [(800, 400), (900, 400)]]).tobytes() != plain
+
+
+def test_render_mopping_in_its_own_colour():
+    vac = render(make_map(), tracks=[[(100, 100, "vac"), (800, 100, "vac")]]).tobytes()
+    assert render(make_map(), tracks=[[(100, 100, "mop"), (800, 100, "mop")]]).tobytes() != vac
+    moving = [[(101, 100, "move"), (801, 100, "move")]]
+    assert (
+        render(make_map(), tracks=moving).tobytes() == render(make_map(), tracks=[[(101, 100), (801, 100)]]).tobytes()
+    )

@@ -24,7 +24,9 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   `opentapovac answer`.
 - The daemon keeps the robot's track and its clean records (time, area,
   mop washes) before the robot forgets them, also for runs started from
-  the app; the map shows the recorded track of the last run.
+  the app.  The map shows the tracks of the last 12 hours (adjustable),
+  with mopping in its own colour, and checkboxes on the web page for
+  vacuuming, mopping and movement.
 - A Nix package and a NixOS module (`services.opentapovac`).
 - A progress line every minute of a run (percent done, vacuuming or
   mopping, room, battery), and warnings when a vacuum pass is skipped or

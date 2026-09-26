@@ -36,6 +36,19 @@
   fallback tracebacks on the credentials.  Document, or give the service a
   fixed group an admin can join.
 
+## Map
+
+* **Is `mop_state` "mopping now" or "mop fitted"?**  The map marks track
+  points as mopping from it, for app runs and vac_then_mop runs.  If it
+  is true for the whole of a vac_then_mop run, the vacuum pass is drawn
+  as mopping.  Read it during the vacuum pass of such a run.
+* **Draw the tracks in the browser.**  Serve the map without tracks (it
+  rarely changes) and `/tracks.json` with the lines and the map geometry
+  (origin, resolution, height), and draw them on a `<canvas>` over the
+  image.  The checkboxes and max age then filter without a round trip,
+  and the event stream can add points live.  Costs the point-type colours
+  and the coordinate transform in JS, next to mapimg.py.
+
 ## From the 2026-09-26 evening runs (field-notes.md)
 
 * **Planner or position?**  Log `real_vac_coor` with the progress line and

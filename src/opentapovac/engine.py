@@ -13,7 +13,7 @@ import dataclasses
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -27,11 +27,14 @@ from .payloads import HOME, STOP, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
 from .rooms import Room, RoomTable
-from .tracks import CleanRecords, Track, describe_record
+from .tracks import KINDS, CleanRecords, Track, describe_record
 
 __all__ = ["AnswerError", "Busy", "Engine", "Job", "JobRequest", "PlanError"]
 
 _LOGGER = logging.getLogger(__name__)
+
+#: how far back the map shows tracks, seconds
+MAP_MAX_AGE = 12 * 3600.0
 
 
 class Busy(RuntimeError):
@@ -101,9 +104,10 @@ class Engine:
         self.job: Job | None = None
         self.jobs: dict[str, Job] = {}
         self._task: asyncio.Task | None = None
-        self._png: bytes | None = None
+        #: the robot's map, fetched once and on refresh; the tracks are drawn on it per request
+        self._map_data: dict[str, Any] | None = None
         self.records = CleanRecords(config.clean_records_file)
-        #: the track of the last job or app run; the map shows it
+        #: the track of the last job or app run, being recorded
         self.track: Track | None = self._last_track()
         self._track_failed = False
         #: the watcher follows the robot outside jobs
@@ -198,11 +202,28 @@ class Engine:
 
     # --- what the robot forgets ---
 
+    async def _cleaning_with(self, job: Job | None) -> str | None:
+        """What the robot cleans with, "vac" or "mop": the run's modes if they agree, else the robot's mop state.
+
+        Unverified: that `mop_state` is false during the vacuum pass of a
+        vac_then_mop run with the mop fitted (TODO.md).
+        """
+        if job and job.step:
+            modes = {s.mode for _, s in job.runs[job.step - 1].items}
+            if modes == {"vac"}:
+                return "vac"
+            if modes <= {"mop", "vac_and_mop"}:
+                return "mop"
+        try:
+            return "mop" if (await self.robot.mop_state()).get("mop_state") else "vac"
+        except Exception:  # noqa: BLE001 — as in _poll_track
+            return None
+
     async def _poll_track(self, job: Job | None) -> None:
         if self.track is None:
             return
         try:
-            await self.track.poll(self.robot)
+            await self.track.poll(self.robot, lambda: self._cleaning_with(job))
         except Exception as e:  # noqa: BLE001 — bookkeeping on a reverse-engineered reply must not end a job
             if not self._track_failed:  # once per track
                 self._track_failed = True
@@ -519,18 +540,39 @@ class Engine:
         self.rooms = RoomTable.from_map(map_data, self.config.rooms)
         self.rooms.save(self.config.rooms_cache)
 
-    async def map_png(self, refresh: bool = False) -> bytes:
-        """The last rendered map with the recorded track (else the robot's own); `refresh` fetches it anew."""
-        if self._png is None or refresh:
-            md = await self.robot.map_data()
-            self._set_rooms(md)
-            names = {r.id: r.label for r in self.rooms}
-            tracks = self.track.points() if self.track else []
-            path = None
-            if not tracks:
-                try:
-                    path = await self.robot.path_data()
-                except RobotError:
-                    pass
-            self._png = mapimg.png_bytes(md, path, names=names, tracks=tracks)
-        return self._png
+    def recent_tracks(self, max_age: float | None) -> list[Track]:
+        """The recorded tracks with points from the last `max_age` seconds (None: all), oldest first."""
+        since = time.time() - max_age if max_age else 0
+        files = []
+        for f in self.config.tracks_dir.glob("*.json"):
+            with contextlib.suppress(OSError):
+                files.append((f.stat().st_mtime, f))
+        out = []
+        for mtime, f in sorted(files):
+            if mtime < since:
+                continue
+            try:
+                out.append(Track.load(f))
+            except (OSError, ValueError, KeyError):
+                continue
+        return out
+
+    async def map_png(
+        self, refresh: bool = False, max_age: float | None = MAP_MAX_AGE, show: Collection[str] = KINDS
+    ) -> bytes:
+        """The map with the tracks recorded in the last `max_age` seconds (None: all), of the kinds in `show`.
+
+        The map itself is fetched once and again on `refresh`.  Before the first
+        track is ever recorded, the robot's own track is drawn instead, unfiltered.
+        """
+        if self._map_data is None or refresh:
+            self._map_data = await self.robot.map_data()
+            self._set_rooms(self._map_data)
+        since = time.time() - max_age if max_age else 0
+        tracks = [line for t in self.recent_tracks(max_age) for line in t.lines(since, show)]
+        path = None
+        if not any(self.config.tracks_dir.glob("*.json")):
+            with contextlib.suppress(RobotError):
+                path = await self.robot.path_data()
+        names = {r.id: r.label for r in self.rooms}
+        return mapimg.png_bytes(self._map_data, path, names=names, tracks=tracks)

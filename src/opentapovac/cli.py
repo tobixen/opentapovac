@@ -27,7 +27,7 @@ import argcomplete
 from . import __version__, mapimg
 from .client import DaemonClient, DaemonError
 from .config import Config, load_config, load_credentials
-from .engine import AnswerError, Busy, Engine, JobRequest, PlanError
+from .engine import MAP_MAX_AGE, AnswerError, Busy, Engine, JobRequest, PlanError
 from .events import EventLog, format_record
 from .payloads import MODES
 from .robot import KasaRobot, RobotError
@@ -87,8 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
     lg = sub.add_parser("log", help="recent events")
     lg.add_argument("-n", type=int, default=30)
     lg.add_argument("-f", "--follow", action="store_true", help="follow the daemon's events")
-    m = sub.add_parser("map", help="save the map with the last track as PNG")
+    m = sub.add_parser("map", help="save the map with the recent tracks as PNG")
     m.add_argument("out")
+    m.add_argument(
+        "--max-age", type=float, default=MAP_MAX_AGE / 3600, metavar="HOURS", help="tracks from the last HOURS (0: all)"
+    )
     m.add_argument("--refresh", action="store_true", help="fetch a fresh map (always, when standalone)")
     rm = sub.add_parser("render-map", help="render saved getMapData/getPathData dumps", description=mapimg.__doc__)
     rm.add_argument("dump", help="getMapData reply (raw `kasa --json` output is fine)")
@@ -311,7 +314,7 @@ async def via_daemon(args: argparse.Namespace, config: Config, dc: DaemonClient)
     elif cmd == "rooms":
         print_rooms((await dc.rooms(refresh=args.refresh))["rooms"])
     elif cmd == "map":
-        Path(args.out).write_bytes(await dc.map_png(refresh=args.refresh))
+        Path(args.out).write_bytes(await dc.map_png(refresh=args.refresh, max_age=args.max_age))
     elif cmd == "log" and args.follow:
         async for rec in dc.events(backlog=args.n):
             echo(rec, config)
@@ -367,7 +370,7 @@ async def standalone(args: argparse.Namespace, config: Config) -> int:
                 await engine.refresh_rooms()
             print_rooms([asdict(r) | {"label": r.label} for r in engine.rooms])
         elif cmd == "map":
-            Path(args.out).write_bytes(await engine.map_png(refresh=True))
+            Path(args.out).write_bytes(await engine.map_png(refresh=True, max_age=args.max_age * 3600 or None))
         elif cmd == "serve":
             from .web.server import serve
 

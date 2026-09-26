@@ -1,3 +1,5 @@
+import os
+
 from opentapovac.tracks import CleanRecords, Track, describe_record
 from tests.conftest import FakeRobot, record
 
@@ -13,7 +15,8 @@ async def test_track_fetches_only_new_points(tmp_path):
     assert await t.poll(robot) == 2
     assert await t.poll(robot) == 0
     assert robot.path_calls == [0, 3, 5]
-    assert t.segments == [{"path_id": 7, "n": 5, "points": [[100, 100], [104, 100], [108, 100], [112, 100]]}]
+    assert t.segments[0]["points"] == [[100, 100], [104, 100], [108, 100], [112, 100]]
+    assert t.segments[0]["n"] == 5
 
 
 async def test_track_new_segment_when_path_id_changes(tmp_path):
@@ -43,6 +46,53 @@ async def test_track_saved_and_loaded(tmp_path):
     await t.poll(robot)
     assert Track.load(tmp_path / "tracks" / "t.json").segments == t.segments
     assert t.points() == [[(100, 100), (104, 100)]]
+
+
+async def test_track_marks_when_and_what(tmp_path):
+    robot = FakeRobot()
+    robot.path = (7, [HEADER, (100, 100), (104, 100)])
+    t = Track(tmp_path / "t.json")
+    asked = []
+
+    def cleaning_with(kind):
+        async def ask():
+            asked.append(kind)
+            return kind
+
+        return ask
+
+    await t.poll(robot, cleaning_with("vac"), now=1000)
+    robot.path = (7, [*robot.path[1], (108, 100)])
+    await t.poll(robot, cleaning_with("mop"), now=1060)
+    await t.poll(robot, cleaning_with("mop"), now=1120)  # nothing new: no mark, and nothing asked
+    assert t.segments[0]["marks"] == [[0, 1000, "vac"], [2, 1060, "mop"]]
+    assert asked == ["vac", "mop"]
+    assert Track.load(tmp_path / "t.json").segments == t.segments
+
+
+def test_track_lines_by_age_and_kind():
+    # (109, 100) is a "moving between areas" point, the others cleaning ones
+    pts = [[100, 100], [104, 100], [109, 100], [112, 100], [116, 100]]
+    t = Track(
+        None, [{"path_id": 7, "n": 6, "points": pts, "marks": [[0, 1000, "vac"], [2, 2000, "vac"], [3, 3000, "mop"]]}]
+    )
+    v, v2, m, p, p2 = (100, 100, "vac"), (104, 100, "vac"), (109, 100, "move"), (112, 100, "mop"), (116, 100, "mop")
+    assert t.lines() == [[v, v2, m, p, p2]]
+    assert t.lines(since=1500) == [[v2, m, p, p2]]  # the line from the last old point on
+    assert t.lines(show={"vac", "mop"}) == [[v, v2], [m, p, p2]]
+    assert t.lines(show={"move"}) == [[v2, m]]
+    assert t.lines(since=5000) == []
+
+
+def test_track_lines_of_an_old_file(tmp_path):
+    """Tracks saved before the marks: the file's time, cleaning of unknown kind."""
+    f = tmp_path / "t.json"
+    f.write_text('{"segments": [{"path_id": 7, "n": 3, "points": [[100, 100], [104, 100]]}]}')
+    os.utime(f, (5000, 5000))
+    t = Track.load(f)
+    assert t.lines(show={"mop"}) == [[(100, 100, None), (104, 100, None)]]
+    assert t.lines(since=6000) == []
+    assert t.lines(show={"move"}) == []
 
 
 async def test_clean_records(tmp_path):

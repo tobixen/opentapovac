@@ -21,6 +21,8 @@ DOCK, ROBOT, GOTO, ZONE = (0, 150, 0), (200, 0, 0), (0, 0, 200), (220, 0, 0)
 #: track point type -> colour; app oe1/a.java b()/h()
 TRACK = {0: (0, 90, 255), 5: (0, 90, 255), 1: (0, 160, 0), 3: (255, 140, 0), 4: (255, 140, 0)}
 TRACK_OTHER = (200, 0, 200)
+#: cleaning points recorded while mopping (tracks.Track.lines)
+TRACK_MOP = (0, 200, 230)
 
 
 def _font() -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -87,9 +89,9 @@ def render(
     path_data: dict[str, Any] | None = None,
     names: dict[int, str] | None = None,
     scale: int = 4,
-    tracks: list[list[tuple[int, int]]] | None = None,
+    tracks: list[list[tuple[int, int]]] | list[list[tuple[int, int, str | None]]] | None = None,
 ) -> Image.Image:
-    """`tracks`: saved track segments, drawn like the one in `path_data`."""
+    """`tracks`: saved track segments, drawn like the one in `path_data`; (x, y, "mop") marks mopping."""
     d = map_data
     w, h, res = d["width"], d["height"], d["resolution"]
     raw = pixels(d)
@@ -133,13 +135,14 @@ def render(
             dr.text((pts[0][0] + 4, pts[0][1] + 4), f"{a['id']}:{a['type']}", fill=ZONE)
         elif a.get("type") == "virtual_wall" and len(pts) == 2:
             dr.line(pts, fill=ZONE, width=4)
-    segments = list(tracks or [])
+    segments: list[Any] = list(tracks or [])
     if path_data:
         segments.append(track_points(path_data))
     for pts in segments:
         for a, b in zip(pts, pts[1:], strict=False):
             t = (b[0] % 4 << 2) + b[1] % 4
-            dr.line((p(a), p(b)), fill=TRACK.get(t, TRACK_OTHER), width=2)
+            col = TRACK_MOP if b[2:] == ("mop",) and t in (0, 5) else TRACK.get(t, TRACK_OTHER)
+            dr.line((p(a), p(b)), fill=col, width=2)
     for key, col, lab in (
         ("real_charge_coor", DOCK, "dock"),
         ("real_vac_coor", ROBOT, "robot"),

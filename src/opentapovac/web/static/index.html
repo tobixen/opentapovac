@@ -39,6 +39,10 @@
   #log .progress { color: var(--muted); }
   #log .warn { color: var(--warn); } #log .alert, #log .error { color: var(--alert); font-weight: 600; }
   #map { width: 100%; height: auto; border-radius: 6px; background: #fff; }
+  #mapopts { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-bottom: 8px; font-size: .9rem; }
+  #mapopts input[type=number] { width: 4.5em; font: inherit; }
+  /* mapimg.TRACK, TRACK_MOP; movement is also green (heading home) and purple (other) */
+  #mapopts .vac { color: #005aff; } #mapopts .mop { color: #00c8e6; } #mapopts .move { color: #ff8c00; }
   .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 </style>
 </head>
@@ -74,7 +78,15 @@
   <section><ul id="log"></ul></section>
 
   <h2 class="row">Map <button id="reload">Reload</button></h2>
-  <section><img id="map" alt="map with the last track"></section>
+  <section>
+    <div id="mapopts">
+      <label>Last <input type="number" id="maxage" min="0" step="1" value="12"> h (0: all)</label>
+      <label class="vac"><input type="checkbox" id="show-vac" checked> vacuum</label>
+      <label class="mop"><input type="checkbox" id="show-mop" checked> mop</label>
+      <label class="move"><input type="checkbox" id="show-move" checked> movement</label>
+    </div>
+    <img id="map" alt="map with the recent tracks">
+  </section>
 </main>
 <script src="/static/app.js"></script>
 </body>

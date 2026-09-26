@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -74,6 +75,23 @@ async def test_status_and_map(make_client):
     assert st["status_text"] == "drying mop"
     assert (await client.get("/map.png")).content_type == "image/png"
     assert (await client.post("/map/refresh", json={})).status == 200
+    assert (await client.get("/map.png?max_age=2.5&show=vac,move")).status == 200
+    assert (await client.get("/map.png?max_age=0&show=")).status == 200
+    for bad in ("soon", "nan", "inf", "-1"):
+        assert (await client.get(f"/map.png?max_age={bad}")).status == 400
+    await client.close()
+
+
+async def test_map_options_reach_the_engine(make_client, config):
+    client, _, _ = await make_client()
+    config.tracks_dir.mkdir(parents=True)
+    seg = {"path_id": 7, "n": 3, "points": [[100, 100], [800, 100]], "marks": [[0, time.time() - 7200, "vac"]]}
+    (config.tracks_dir / "t.json").write_text(json.dumps({"segments": [seg]}))
+    plain = await (await client.get("/map.png?show=")).read()
+    assert await (await client.get("/map.png?show=vac")).read() != plain
+    assert await (await client.get("/map.png?show=mop,move")).read() == plain
+    assert await (await client.get("/map.png?max_age=1&show=vac")).read() == plain
+    await client.close()
     await client.close()
 
 

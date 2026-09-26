@@ -53,8 +53,8 @@ second-class; both go through the same HTTP API or the same in-process
 engine.
 
 In: start a run (rooms + mode), stop / send home, status, battery/base
-warnings, event log, map with the last track, the home rules below,
-notifications.  One robot.
+warnings, event log, map with the recent tracks (max age, vacuum / mop /
+movement checkboxes), the home rules below, notifications.  One robot.
 
 Out: schedules, consumables, settings, map editing, multi-robot.  The
 family keeps the Tapo app for those.
@@ -174,7 +174,7 @@ One page, phones first.
 
 HTTP API (the CLI uses it too): `POST /jobs`, `GET /jobs/{id}`,
 `POST /jobs/{id}/answer`, `POST /stop`, `GET /status`, `GET /events`
-(SSE), `GET /map.png`, `POST /map/refresh`.
+(SSE), `GET /map.png?max_age=HOURS&show=vac,mop,move`, `POST /map/refresh`.
 
 Framework: aiohttp (python-kasa already depends on it) or Starlette.
 Lean: aiohttp, one dependency less.

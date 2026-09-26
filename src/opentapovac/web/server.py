@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from importlib.resources import files
 from urllib.parse import urlsplit
 
 from aiohttp import web
 
 from .. import __version__
-from ..engine import AnswerError, Busy, Engine, JobRequest, PlanError
+from ..engine import MAP_MAX_AGE, AnswerError, Busy, Engine, JobRequest, PlanError
 from ..payloads import MODE_LABELS
 from ..robot import RobotError
+from ..tracks import KINDS
 
 ENGINE: web.AppKey[Engine] = web.AppKey("engine", Engine)
 ALLOWED_HOSTS: web.AppKey[set[str]] = web.AppKey("allowed_hosts", set)
@@ -195,7 +197,17 @@ async def events(request: web.Request) -> web.StreamResponse:
 
 @routes.get("/map.png")
 async def map_png(request: web.Request) -> web.Response:
-    return web.Response(body=await request.app[ENGINE].map_png(), content_type="image/png")
+    """`max_age`: hours of tracks to show (0: all, default 12); `show`: of the kinds vac,mop,move (default all)."""
+    q = request.query
+    try:
+        hours = float(q["max_age"]) if "max_age" in q else MAP_MAX_AGE / 3600
+    except ValueError:
+        hours = -1
+    if not 0 <= hours < math.inf:
+        return _error(400, f"max_age: not a number of hours: {q['max_age']!r}")
+    show = set(q["show"].split(",")) & KINDS if "show" in q else KINDS
+    png = await request.app[ENGINE].map_png(max_age=hours * 3600 or None, show=show)
+    return web.Response(body=png, content_type="image/png")
 
 
 @routes.post("/map/refresh")

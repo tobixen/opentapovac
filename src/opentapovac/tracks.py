@@ -5,6 +5,8 @@ least when it is carried or relocates (2026-09-26: a 25-minute run left 14
 points).  `Track.poll` fetches only the points added since the last poll
 (`start_pos`), so polling it every time the status is polled is cheap.
 A new `path_id`, or fewer points than already fetched, starts a new segment.
+Each poll marks where its points start with the time and whether the robot
+was vacuuming or mopping; the robot's own point types don't tell the two apart.
 
 `getCleanRecords` lists the robot's runs (time, area, mop washes, error);
 `CleanRecords` appends the new ones to a jsonl file.
@@ -13,6 +15,8 @@ A new `path_id`, or fewer points than already fetched, starts a new segment.
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -20,16 +24,30 @@ from .codes import error_text
 from .mapimg import track_points
 from .robot import Robot
 
+#: what the map can show: cleaning by vacuum or mop, and all else (moving between areas, heading home, ...)
+KINDS = frozenset({"vac", "mop", "move"})
+#: point types of cleaning; mapimg.TRACK
+CLEANING = {0, 5}
+
+
+def point_type(x: int, y: int) -> int:
+    return (x % 4 << 2) + y % 4
+
 
 class Track:
     def __init__(self, path: Path | None, segments: list[dict[str, Any]] | None = None):
         self.path = path
-        #: {"path_id", "n": robot-side entries fetched (header included), "points": [[x, y], ...]}
+        #: {"path_id", "n": robot-side entries fetched (header included), "points": [[x, y], ...],
+        #:  "marks": [[index of the first point of a poll, Unix time, "vac" | "mop" | None], ...]}
         self.segments: list[dict[str, Any]] = segments or []
+        #: the time of points without marks (tracks saved before them)
+        self.mtime = 0.0
 
     @classmethod
     def load(cls, path: Path) -> Track:
-        return cls(path, json.loads(path.read_text())["segments"])
+        t = cls(path, json.loads(path.read_text())["segments"])
+        t.mtime = path.stat().st_mtime
+        return t
 
     def save(self) -> None:
         if self.path:
@@ -39,8 +57,44 @@ class Track:
     def points(self) -> list[list[tuple[int, int]]]:
         return [[(x, y) for x, y in s["points"]] for s in self.segments if s["points"]]
 
-    async def poll(self, robot: Robot) -> int:
-        """Fetch the points added since the last poll; the number of new points."""
+    def lines(self, since: float = 0, show: Collection[str] = KINDS) -> list[list[tuple[int, int, str | None]]]:
+        """The points newer than `since` of the kinds in `show`, as polylines of (x, y, kind).
+
+        A point's line comes from the point before it, which is included even
+        when it is not shown.  Kind None: cleaning of unknown kind, shown with "vac" or "mop".
+        """
+        out: list[list[tuple[int, int, str | None]]] = []
+        for s in self.segments:
+            marks = s.get("marks") or [[0, self.mtime, None]]
+            line: list[tuple[int, int, str | None]] = []
+            prev = None
+            m = 0
+            for i, (x, y) in enumerate(s["points"]):
+                while m + 1 < len(marks) and marks[m + 1][0] <= i:
+                    m += 1
+                kind = marks[m][2] if point_type(x, y) in CLEANING else "move"
+                pt = (x, y, kind)
+                shown = marks[m][1] >= since and (kind in show if kind else bool({"vac", "mop"} & set(show)))
+                if shown:
+                    if not line and prev:
+                        line.append(prev)
+                    line.append(pt)
+                elif line:
+                    out.append(line)
+                    line = []
+                prev = pt
+            if line:
+                out.append(line)
+        return out
+
+    async def poll(
+        self, robot: Robot, kind: Callable[[], Awaitable[str | None]] | None = None, now: float | None = None
+    ) -> int:
+        """Fetch the points added since the last poll; the number of new points.
+
+        `kind`: asked for "vac" or "mop", what the robot is cleaning with, when there are new points;
+        `now`: Unix time.
+        """
         seg = self.segments[-1] if self.segments else None
         start = seg["n"] if seg else 0
         d = await robot.path_data(start)
@@ -52,6 +106,9 @@ class Track:
         if not d.get("point_counts"):
             return 0
         new = [list(p) for p in track_points(d)]
+        if new:
+            mark = [len(seg["points"]), time.time() if now is None else now, await kind() if kind else None]
+            seg.setdefault("marks", []).append(mark)
         seg["points"] += new
         seg["n"] = d["start_pos"] + d["point_counts"]
         self.save()

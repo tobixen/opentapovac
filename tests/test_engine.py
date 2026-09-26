@@ -1,4 +1,7 @@
 import asyncio
+import json
+import os
+import time
 
 import pytest
 
@@ -115,7 +118,31 @@ async def test_map_png(config, events):
     engine, _ = make_engine(config, events, FakeRobot())
     png = await engine.map_png(refresh=True)
     assert png.startswith(b"\x89PNG")
-    assert await engine.map_png() is png
+    assert await engine.map_png() == png
+
+
+def _track_file(config, name, when, kind="vac", y=100):
+    f = config.tracks_dir / f"{name}.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    seg = {"path_id": 7, "n": 3, "points": [[100, y], [800, y]], "marks": [[0, when, kind]]}
+    f.write_text(json.dumps({"segments": [seg]}))
+    os.utime(f, (when, when))
+
+
+async def test_map_shows_recent_tracks_only(config, events):
+    now = time.time()
+    _track_file(config, "old", now - 20 * 3600)
+    _track_file(config, "new", now - 3600, "mop")
+    _track_file(config, "newer", now - 60, y=300)
+    engine, _ = make_engine(config, events, FakeRobot())
+    assert [t.path.stem for t in engine.recent_tracks(12 * 3600)] == ["new", "newer"]
+    assert len(engine.recent_tracks(None)) == 3
+    both = await engine.map_png(refresh=True)
+    assert await engine.map_png(show={"vac"}) != both
+    assert await engine.map_png(show=set()) != both
+    assert await engine.map_png() == both
+    _track_file(config, "newest", now, y=400)  # no refresh needed to show it
+    assert await engine.map_png() != both
 
 
 async def test_stop_without_job(config, events):
@@ -311,6 +338,7 @@ async def test_run_records_track_and_clean_record(config, events):
     assert job.state == "done", job.message
     track = Track.load(config.state_dir / "tracks" / f"{job.id}.json")
     assert track.points() == [[(100, 100), (104, 100)]]
+    assert track.segments[0]["marks"][0][2] == "vac"  # vac_then_mop, and getMopState says no mop
     [rec] = [r for r in events.recent() if r["code"] == "clean_record"]
     assert "18 min, 11 m²" in rec["msg"]
     assert (await engine.map_png(refresh=True)).startswith(b"\x89PNG")

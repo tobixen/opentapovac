@@ -117,7 +117,32 @@ function follow() {
   es.onerror = () => { es.close(); setTimeout(follow, 5000); };
 }
 
-function showMap() { $("map").src = "/map.png?" + Date.now(); }
+const KINDS = ["vac", "mop", "move"];
+
+function showMap() {
+  const show = KINDS.filter((k) => $("show-" + k).checked);
+  const q = new URLSearchParams({max_age: $("maxage").value || 0, show: show.join(","), t: Date.now()});
+  $("map").src = "/map.png?" + q;
+}
+
+// the map options are remembered per browser; storage may be unavailable
+function mapOpts(save) {
+  try {
+    if (save) {
+      localStorage.setItem("mapopts", JSON.stringify(
+        {maxage: $("maxage").value, show: KINDS.filter((k) => $("show-" + k).checked)}));
+      return;
+    }
+    const o = JSON.parse(localStorage.getItem("mapopts"));
+    if (!o) return;
+    $("maxage").value = o.maxage;
+    for (const k of KINDS) $("show-" + k).checked = o.show.includes(k);
+  } catch (e) { /* defaults */ }
+}
+
+for (const id of ["maxage", ...KINDS.map((k) => "show-" + k)]) {
+  $(id).onchange = () => { mapOpts(true); showMap(); };
+}
 
 $("start").onclick = () => start([...selected]);
 $("stop").onclick = async () => {
@@ -133,5 +158,6 @@ $("reload").onclick = async () => {
 loadRooms().catch((e) => say(e.message));
 loadStatus();
 follow();
+mapOpts();
 showMap();
 setInterval(loadStatus, 30000);

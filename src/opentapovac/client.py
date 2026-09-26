@@ -60,10 +60,12 @@ class DaemonClient:
     async def rooms(self, refresh: bool = False) -> dict[str, Any]:
         return await self._call("POST", "/rooms/refresh") if refresh else await self._call("GET", "/rooms")
 
-    async def map_png(self, refresh: bool = False) -> bytes:
+    async def map_png(self, refresh: bool = False, max_age: float | None = None) -> bytes:
+        """`max_age`: hours of tracks to show (0: all; None: the daemon's default)."""
         if refresh:
             await self._call("POST", "/map/refresh")
-        async with self._session.get(self.url + "/map.png") as r:
+        params = {} if max_age is None else {"max_age": max_age}
+        async with self._session.get(self.url + "/map.png", params=params) as r:
             if r.status >= 400:
                 raise DaemonError(r.status, (await r.json()).get("error", ""))
             return await r.read()
