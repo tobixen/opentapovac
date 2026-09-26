@@ -49,6 +49,12 @@ class Observation:
     mapping: bool | None = None
     #: `getCleanStatus.recharge_status` 1: it wants the dock (mop wash, battery, end of run)
     recharging: bool | None = None
+    # probed once a minute, None otherwise: `getMopState`, `getCleanInfo`, battery
+    mop: bool | None = None
+    percent: int | None = None
+    clean_time: int | None = None
+    clean_area: int | None = None
+    battery: int | None = None
 
     @classmethod
     def from_replies(cls, t: float, vac: dict[str, Any], clean: dict[str, Any] | None = None) -> Observation:
@@ -88,6 +94,8 @@ class MonitorParams:
     gave_up_after: float = 300
     #: after a carry-in: cleaning, not relocating, this long before the position is checked
     verify_after: float = 60
+    #: cleaning with `clean_percent` standing still this long: warn (stuck at a doorstep?)
+    stall_after: float = 300
 
 
 class IdleWatch:
@@ -138,10 +146,17 @@ class Monitor:
         room: str | None = None,
         carry_in: bool = False,
         carry_out: bool = False,
+        vacuum_first: bool = False,
     ):
         self.sent_at = sent_at
         self.p = params
         self.room, self.carry_in, self.carry_out = room, carry_in, carry_out
+        #: vacuum then mop: the first cleaning should be with the mop off
+        self.vacuum_first = vacuum_first
+        self._pass: str | None = None  # vacuum, mop
+        self._percent: int | None = None
+        self._percent_since: float | None = None
+        self._stall_told = False
         self.phase = "starting"
         self.message = ""
         self.ask: Ask | None = None
@@ -216,6 +231,7 @@ class Monitor:
         else:
             self._standby_since = None
         ev += self._carry(o)
+        ev += self._progress(o)
         self._check_due(o)
         if not self._left_dock and o.status in CHARGING | {DRYING}:
             if self._base_since is None:
@@ -227,7 +243,8 @@ class Monitor:
             self._base_since = None
         if self._idle.feed(o) and self._left_dock:
             self.phase = "done"
-            ev.append(Event("info", "done", "run finished, robot is back on the dock"))
+            at = f" (the robot says {self._percent} % done)" if self._percent is not None else ""
+            ev.append(Event("info", "done", f"run finished, robot is back on the dock{at}"))
             if self._lost_dock:
                 self.message = "the run ended after the robot lost the dock; it may be unfinished"
                 ev.append(Event("alert", "maybe_unfinished", self.message))
@@ -264,6 +281,29 @@ class Monitor:
                     ["done", "skip"],
                 )
         return []
+
+    def _progress(self, o: Observation) -> list[Event]:
+        """Vacuum and mop passes (mop state while cleaning), and a stall in `clean_percent`."""
+        ev: list[Event] = []
+        if o.status == CLEANING and o.mop is not None:
+            p = "mop" if o.mop else "vacuum"
+            if p != self._pass:
+                if self._pass is None and self.vacuum_first and p == "mop":
+                    msg = "vacuum then mop, but it started cleaning with the mop on: the vacuum pass was skipped"
+                    ev.append(Event("warn", "skipped_vacuum", msg))
+                self._pass = p
+                ev.append(Event("info", f"{p}_pass", f"{p} pass"))
+        if o.percent is not None:
+            if o.status != CLEANING or o.percent != self._percent:
+                self._percent_since, self._stall_told = o.t, False
+            elif self._percent_since is not None and not self._stall_told:
+                if o.t - self._percent_since >= self.p.stall_after:
+                    self._stall_told = True
+                    mins = (o.t - self._percent_since) / 60
+                    msg = f"no progress for {mins:.0f} min ({o.percent} %): stuck at a doorstep?"
+                    ev.append(Event("warn", "no_progress", msg))
+            self._percent = o.percent
+        return ev
 
     def _ask(self, code: str, text: str, choices: list[str]) -> list[Event]:
         self.ask = Ask(code, text, choices)

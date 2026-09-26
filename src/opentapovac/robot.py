@@ -63,6 +63,14 @@ class Robot:
         """The track since `start_pos` (the robot's own index, header entry included)."""
         return await self.query("getPathData", {"start_pos": start_pos})
 
+    async def clean_info(self) -> dict[str, Any]:
+        """The current run: `clean_time` (min), `clean_area` (m²), `clean_percent`."""
+        return await self.query("getCleanInfo")
+
+    async def mop_state(self) -> dict[str, Any]:
+        """`mop_state`: true while the mop is on."""
+        return await self.query("getMopState")
+
     async def clean_records(self) -> dict[str, Any]:
         return await self.query("getCleanRecords")
 

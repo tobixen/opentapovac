@@ -92,6 +92,8 @@ class FakeRobot(Robot):
         self.records = []
         #: appended to `records` when a run is sent
         self.next_record = None
+        self.clean_info_reply = {"clean_time": 5, "clean_area": 3, "clean_percent": 20}
+        self.mop = False
 
     async def _raw(self, method, params):
         if method in self.fail:
@@ -113,6 +115,10 @@ class FakeRobot(Robot):
                 raise RobotError("no path")
             self.path_calls.append(params["start_pos"])
             return path_reply(*self.path, params["start_pos"])
+        if method == "getCleanInfo":
+            return dict(self.clean_info_reply)
+        if method == "getMopState":
+            return {"mop_state": self.mop}
         if method == "getCleanRecords":
             return {"record_list": list(self.records)}
         if method == "runCleanTask" and params.get("clean_on") and self.next_record:

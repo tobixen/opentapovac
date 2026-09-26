@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import time
 import uuid
@@ -21,7 +22,7 @@ from . import mapimg
 from .codes import error_text, status_text
 from .config import Config
 from .events import EventLog
-from .monitor import Ask, IdleWatch, Monitor, MonitorParams, Observation
+from .monitor import CLEANING, Ask, IdleWatch, Monitor, MonitorParams, Observation
 from .payloads import HOME, STOP, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
@@ -108,7 +109,11 @@ class Engine:
         #: the watcher follows the robot outside jobs
         self._watching = False
         self._submit_lock = asyncio.Lock()
-        self.params = MonitorParams(config.start_timeout, config.settle, config.gave_up_after, config.verify_after)
+        self.params = MonitorParams(
+            config.start_timeout, config.settle, config.gave_up_after, config.verify_after, config.stall_after
+        )
+        #: the map, for naming the room the robot is in; loaded once per job or app run
+        self._map: dict[str, Any] | None = None
 
     # --- planning ---
 
@@ -165,6 +170,7 @@ class Engine:
         try:
             await self._preflight(job)
             self.track, self._track_failed = Track(self.config.tracks_dir / f"{job.id}.json"), False
+            await self._load_map()
             for i, run in enumerate(job.runs):
                 job.step = i + 1
                 await self._wait_idle(job)
@@ -226,8 +232,11 @@ class Engine:
             name = datetime.now(UTC).strftime("app-%Y%m%d-%H%M%S.json")
             self.track, self._track_failed = Track(self.config.tracks_dir / name), False
             self._emit("info", f"robot is busy without a job ({status_text(status)}); recording its track", "app_run")
+            await self._load_map()
         if active:
             await self._poll_track(None)
+            with contextlib.suppress(RobotError):
+                self._emit_progress(await self._observe(probe=True), None)
         elif self._watching:
             self._watching = False
             await self._poll_track(None)
@@ -311,13 +320,62 @@ class Engine:
             self._emit("warn", f"could not read battery/base: {e}", "preflight", job)
         await self._fetch_records(job, report=False)  # what came before this job
 
-    async def _observe(self) -> Observation:
+    async def _observe(self, probe: bool = False) -> Observation:
+        """The status; with `probe`, also the mop, the progress and the battery (once a minute)."""
         vac = await self.robot.vac_status()
         try:
             clean = await self.robot.clean_status()
         except RobotError:
             clean = None
-        return Observation.from_replies(self.clock(), vac, clean)
+        o = Observation.from_replies(self.clock(), vac, clean)
+        if not probe:
+            return o
+        extra: dict[str, Any] = {}
+        # each on its own: a failing one must not cost the others, or the poll
+        with contextlib.suppress(Exception):
+            info = await self.robot.clean_info()
+            extra.update(percent=info.get("clean_percent"), clean_time=info.get("clean_time"))
+            extra["clean_area"] = info.get("clean_area")
+        with contextlib.suppress(Exception):
+            extra["mop"] = (await self.robot.mop_state()).get("mop_state")
+        with contextlib.suppress(Exception):
+            extra["battery"] = (await self.robot.battery()).get("battery_percentage")
+        return dataclasses.replace(o, **extra)
+
+    async def _load_map(self) -> None:
+        try:
+            self._map = await self.robot.map_data()
+        except Exception:  # noqa: BLE001 — only used to name rooms in the progress lines
+            self._map = None
+
+    def _room_now(self) -> str | None:
+        """The room of the last track point, if there is a track and a map."""
+        if not (self._map and self.track and self.track.segments and self.track.segments[-1]["points"]):
+            return None
+        try:
+            near = mapimg.rooms_near(self._map, self.track.segments[-1]["points"][-1], 100)
+        except Exception:  # noqa: BLE001 — a bad map costs the room name, not the run
+            return None
+        return " / ".join(sorted(self.rooms.label_of(r) for r in near)) or None
+
+    def _emit_progress(self, o: Observation, job: Job | None) -> None:
+        parts = []
+        if o.percent is not None:
+            parts.append(f"{o.percent} %")
+        if o.clean_time is not None:
+            parts.append(f"{o.clean_time} min")
+        if o.clean_area is not None:
+            parts.append(f"{o.clean_area} m²")
+        if o.status == CLEANING and o.mop is not None:
+            parts.append("mopping" if o.mop else "vacuuming")
+        else:
+            parts.append(status_text(o.status))
+        room = self._room_now()
+        if room:
+            parts.append(f"in {room}")
+        if o.battery is not None:
+            parts.append(f"battery {o.battery} %")
+        self._emit("info", ", ".join(parts), "progress", job)
 
     async def _wait_idle(self, job: Job) -> None:
         watch = IdleWatch(self.config.settle)
@@ -352,7 +410,9 @@ class Engine:
 
     async def _follow(self, job: Job, run: Run) -> None:
         room = run.rooms[0]
-        m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out)
+        vacuum_first = run.items[0][1].mode == "vac_then_mop"
+        m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out, vacuum_first)
+        probed_at = float("-inf")
         posed: Ask | None = None
         posed_at, told = 0.0, False
         lost_since: float | None = None
@@ -369,8 +429,9 @@ class Engine:
                         self._emit("warn", f"skipped {room.label}: stop sent", "skipped", job)
                         return
                     m.answer(choice)
+                probe = self.clock() - probed_at >= self.config.progress_interval
                 try:
-                    o = await self._observe()
+                    o = await self._observe(probe)
                 except RobotError as e:
                     # a lost poll is not a lost run; keep watching, but say so when it lasts
                     self._emit("warn", f"poll failed: {e}", "poll_failed", job)
@@ -383,9 +444,12 @@ class Engine:
                 if lost_told:
                     self._emit("info", "contact with the robot is back", "contact", job)
                 lost_since, lost_told = None, False
+                await self._poll_track(job)  # first: the progress line names the room from it
+                if probe:
+                    probed_at = o.t
+                    self._emit_progress(o, job)
                 for ev in m.step(o):
                     self._emit(ev.level, ev.msg, ev.code, job)
-                await self._poll_track(job)
                 if m.phase == "done":
                     if m.message:
                         job.message = m.message

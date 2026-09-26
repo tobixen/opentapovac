@@ -314,3 +314,41 @@ def test_back_at_the_base_without_cleaning_fails():
     feed(m, [obs(200, 6)])
     assert m.phase == "failed"
     assert "without cleaning" in m.message
+
+
+def test_passes_are_logged():
+    m = Monitor(sent_at=0, params=P)
+    events = feed(m, [obs(20, 1, mop=False), obs(40, 1, mop=False), obs(60, 15), obs(80, 1, mop=True)])
+    assert [e.code for e in events if e.code.endswith("_pass")] == ["vacuum_pass", "mop_pass"]
+
+
+def test_skipped_vacuum_pass_warned():
+    # 2026-09-26 22:18: vacuum then mop, but it went out once and came back for the mop
+    m = Monitor(sent_at=0, params=P, vacuum_first=True)
+    events = feed(m, [obs(20, 17), obs(40, 15), obs(60, 1, mop=True)])
+    assert [e.level for e in events if e.code == "skipped_vacuum"] == ["warn"]
+    m = Monitor(sent_at=0, params=P, vacuum_first=True)
+    assert "skipped_vacuum" not in codes(feed(m, [obs(20, 1, mop=False), obs(600, 1, mop=True)]))
+
+
+def test_no_progress_warned_once():
+    # 2026-09-26 22:47: at the kitchen doorstep, 45 % for many minutes
+    m = Monitor(sent_at=0, params=P)
+    events = feed(m, [obs(20, 1, percent=45), obs(80, 1, percent=45), obs(340, 1, percent=45), obs(400, 1, percent=45)])
+    assert [e.level for e in events if e.code == "no_progress"] == ["warn"]
+    assert "45 %" in next(e.msg for e in events if e.code == "no_progress")
+    # progress again: warned anew the next time it stalls
+    events = feed(m, [obs(460, 1, percent=46), obs(800, 1, percent=46)])
+    assert codes(events).count("no_progress") == 1
+
+
+def test_no_progress_only_while_cleaning():
+    m = Monitor(sent_at=0, params=P)
+    events = feed(m, [obs(20, 1, percent=45), obs(80, 15, percent=45), obs(700, 15, percent=45)])
+    assert "no_progress" not in codes(events)
+
+
+def test_end_percentage_reported():
+    m = Monitor(sent_at=0, params=P)
+    events = feed(m, [obs(20, 1, percent=45), obs(40, 4), obs(60, 16)])
+    assert "45 %" in next(e.msg for e in events if e.code == "done")

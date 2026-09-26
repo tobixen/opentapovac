@@ -60,6 +60,10 @@ class Config:
     verify_after: float = 60
     #: the daemon checks the robot this often when no job runs (runs from the app, the end of a job)
     watch_interval: float = 60
+    #: a progress line (percent, pass, room, battery) this often while the robot works
+    progress_interval: float = 60
+    #: cleaning without progress this long: warn
+    stall_after: float = 300
 
     def __post_init__(self) -> None:
         if self.daemon_url is None:
@@ -114,7 +118,7 @@ class Config:
 
 
 DURATIONS = ("poll_interval", "settle", "start_timeout", "gave_up_after", "idle_timeout")
-DURATIONS += ("human_wait_timeout", "verify_after", "watch_interval")
+DURATIONS += ("human_wait_timeout", "verify_after", "watch_interval", "progress_interval", "stall_after")
 _UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
 
 

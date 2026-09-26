@@ -99,7 +99,7 @@ function fmt(t) {
 
 function addLog(rec) {
   const li = document.createElement("li");
-  li.className = rec.level;
+  li.className = rec.level + (rec.code === "progress" ? " progress" : "");
   const time = document.createElement("time");
   time.textContent = fmt(rec.t);
   li.append(time, rec.msg);

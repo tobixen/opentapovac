@@ -286,6 +286,18 @@ From the app, not yet sent:
   the vacuum and mop passes separately.  `notify_event` meaning unknown
   (20: the run abandoned after err 21; 24, 28 otherwise).
 
+### Progress, mop, go-to — 2026-09-26
+
+* `getCleanInfo` → `clean_time` (min), `clean_area` (m²), `clean_percent`
+  of the current run (read mid-run: 20, 9, 45; stood still at 45 while the
+  robot fought the kitchen doorstep).
+* `getMopState` → `mop_state`: true while the mop is on (mid-run, mopping).
+* `getAreaInfo`, `getCleanRecordExtraInfo` without params: -1008
+  (PARAMS_ERROR).
+* From the app, not yet sent: `gotoPoint {"switch": true, "point": [x, y]}`
+  (`GotoPointParams`), presumably in the mm frame of `getMapData`'s
+  `goto_point` / `real_vac_coor`; status 11 while going.
+
 ### Map lock and relocation — verified 2026-09-25
 
 * Lock: `setMapInfo {"map_list": [{"map_id": <id>, "map_locked": true}]}`

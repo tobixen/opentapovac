@@ -431,3 +431,52 @@ async def test_watcher_backs_off_when_a_job_starts_meanwhile(config, events):
     robot.vac_status = slow_vac_status
     await engine.watch_step()
     assert robot.path_calls == []
+
+
+async def test_progress_logged_every_minute(config, events):
+    robot = FakeRobot([16, 1, 1, 1, 1, 1, 1, 1, 4, 16])
+    robot.clean_info_reply = {"clean_time": 20, "clean_area": 9, "clean_percent": 45}
+    robot.mop = True
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "done", job.message
+    lines = [r["msg"] for r in events.recent() if r["code"] == "progress"]
+    assert len(lines) == 3  # polls every 20 s for ~180 s, a line a minute
+    assert lines[0].startswith("45 %, 20 min, 9 m², mopping")
+    assert "battery 88 %" in lines[0]
+
+
+async def test_progress_logged_by_the_watcher(config, events):
+    robot = FakeRobot([1])
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()
+    assert [r["msg"] for r in events.recent() if r["code"] == "progress"][0].startswith("20 %, 5 min, 3 m², vacuuming")
+
+
+async def test_progress_names_the_room(config, events):
+    robot = FakeRobot([16, 1, 1, 1, 1, 4, 16])
+    robot.path = (7, [(1, 0), (100, 100)])
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "done", job.message
+    assert " in " in [r["msg"] for r in events.recent() if r["code"] == "progress"][0]
+
+
+async def test_a_corrupt_map_costs_only_the_room_name(config, events):
+    robot = FakeRobot([16, 1, 1, 1, 1, 4, 16])
+    robot.path = (7, [(1, 0), (100, 100)])
+    robot.map_data_reply = {**robot.map_data_reply, "map_data": "AAAA"}  # lz4 refuses it
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "done", job.message
+    assert [r for r in events.recent() if r["code"] == "progress"]
+
+
+async def test_progress_leaves_out_what_the_robot_did_not_say(config, events):
+    robot = FakeRobot([1])
+    robot.clean_info_reply = {"clean_percent": 20}
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()
+    line = [r["msg"] for r in events.recent() if r["code"] == "progress"][0]
+    assert line.startswith("20 %, vacuuming"), line
+    assert "None" not in line
