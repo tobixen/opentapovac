@@ -118,7 +118,10 @@ to it.  The map shows the recorded track of the last run.
 
 The daemon binds to localhost.  To reach the web page from phones, put a
 reverse proxy with authentication in front of it; the daemon has no
-accounts of its own.
+accounts of its own.  Name the proxy's host in `allowed_hosts:` in the
+config: the daemon answers only to localhost and the names listed there,
+and takes POSTs only as JSON from its own origin, so other web pages can't
+drive the robot through your browser.
 
 A carry room gets a run of its own, before the others.  For a
 `carry_in` room the run starts from the dock as usual (so the mops go on

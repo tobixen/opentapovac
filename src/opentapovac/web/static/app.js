@@ -4,6 +4,8 @@ const selected = new Set();
 let mode = null, timezone = undefined, busy = false, statusSoon = null;
 
 async function api(method, path, body) {
+  // the daemon takes JSON POSTs only (it keeps other web pages out that way)
+  if (method === "POST") body = body || {};
   const r = await fetch(path, {method, headers: body ? {"Content-Type": "application/json"} : {},
                                body: body ? JSON.stringify(body) : undefined});
   const data = r.headers.get("content-type")?.includes("json") ? await r.json() : null;

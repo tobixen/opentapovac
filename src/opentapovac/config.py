@@ -39,6 +39,8 @@ class Config:
     order: dict[str, list[int | str]] = field(default_factory=dict)
     presets: list[dict[str, Any]] = field(default_factory=list)
     listen: str = "127.0.0.1:8765"
+    #: host names the web page is reached by, besides localhost and `listen` (a reverse proxy's name)
+    allowed_hosts: list[str] = field(default_factory=list)
     daemon_url: str | None = None
     cache_dir: Path = Path("~/.cache/opentapovac").expanduser()
     state_dir: Path = Path("~/.local/state/opentapovac").expanduser()

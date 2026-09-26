@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from importlib.resources import files
+from urllib.parse import urlsplit
 
 from aiohttp import web
 
@@ -18,6 +19,7 @@ from ..payloads import MODE_LABELS
 from ..robot import RobotError
 
 ENGINE: web.AppKey[Engine] = web.AppKey("engine", Engine)
+ALLOWED_HOSTS: web.AppKey[set[str]] = web.AppKey("allowed_hosts", set)
 STATIC = files(__package__) / "static"
 KEEPALIVE = 15
 
@@ -36,6 +38,30 @@ async def errors(request: web.Request, handler):
         return _error(409, str(e))
     except RobotError as e:
         return _error(502, f"robot: {e}")
+
+
+def _hostname(host: str) -> str:
+    """The host name without the port: example.org:8765 -> example.org, [::1]:8765 -> ::1."""
+    return urlsplit(f"//{host}").hostname or ""
+
+
+@web.middleware
+async def same_site(request: web.Request, handler):
+    """No accounts here, so keep other web pages out.
+
+    The Host must be one we serve (against DNS rebinding), and a POST must be
+    JSON (a cross-site form or no-cors fetch can't send that without a CORS
+    preflight, which is never answered) from our own Origin, if it names one.
+    """
+    if _hostname(request.host) not in request.app[ALLOWED_HOSTS]:
+        return _error(403, f"unknown host {request.host!r} (see allowed_hosts in the config)")
+    if request.method == "POST":
+        if request.content_type != "application/json":
+            return _error(415, "POST bodies must be application/json")
+        origin = request.headers.get("Origin")
+        if origin and urlsplit(origin).netloc != request.host:
+            return _error(403, f"cross-origin request from {origin}")
+    return await handler(request)
 
 
 routes = web.RouteTableDef()
@@ -178,9 +204,23 @@ async def map_refresh(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+class _AllowedHosts(set):
+    """localhost, the listen address, and `allowed_hosts` from the config, read on every request."""
+
+    def __init__(self, engine: Engine):
+        super().__init__()
+        self.engine = engine
+
+    def __contains__(self, host: object) -> bool:
+        c = self.engine.config
+        listen = _hostname(c.listen.rpartition(":")[0] or "127.0.0.1")
+        return host in {"localhost", "127.0.0.1", "::1", listen, *c.allowed_hosts}
+
+
 def make_app(engine: Engine) -> web.Application:
-    app = web.Application(middlewares=[errors])
+    app = web.Application(middlewares=[same_site, errors])
     app[ENGINE] = engine
+    app[ALLOWED_HOSTS] = _AllowedHosts(engine)
     app.add_routes(routes)
     return app
 

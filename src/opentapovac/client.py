@@ -31,6 +31,8 @@ class DaemonClient:
             return False
 
     async def _call(self, method: str, path: str, body: Any = None) -> Any:
+        if method == "POST" and body is None:
+            body = {}  # the daemon takes JSON POSTs only
         async with self._session.request(method, self.url + path, json=body) as r:
             data = await r.json()
             if r.status >= 400:

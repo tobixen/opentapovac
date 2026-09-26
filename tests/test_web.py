@@ -64,7 +64,7 @@ async def test_bad_request_and_busy(make_client):
     assert (await client.post("/jobs", json={"rooms": ["stairs"]})).status == 400
     assert (await client.post("/jobs", json={"rooms": ["kitchen"]})).status == 201
     assert (await client.post("/jobs", json={"rooms": ["kitchen"]})).status == 409
-    assert (await client.post("/stop")).status == 200
+    assert (await client.post("/stop", json={})).status == 200
     await client.close()
 
 
@@ -73,7 +73,7 @@ async def test_status_and_map(make_client):
     st = await (await client.get("/status")).json()
     assert st["status_text"] == "drying mop"
     assert (await client.get("/map.png")).content_type == "image/png"
-    assert (await client.post("/map/refresh")).status == 200
+    assert (await client.post("/map/refresh", json={})).status == 200
     await client.close()
 
 
@@ -147,4 +147,33 @@ async def test_rooms_carry_flags(make_client, config):
     data = await (await client.get("/rooms")).json()
     [r6] = [r for r in data["rooms"] if r["id"] == 6]
     assert (r6["carry_in"], r6["carry_out"]) == (False, True)
+    await client.close()
+
+
+async def test_post_must_be_json(make_client):
+    # review finding: a no-cors text/plain POST from any web page started jobs
+    client, _, robot = await make_client()
+    r = await client.post("/jobs", data='{"rooms": ["kitchen"]}', headers={"Content-Type": "text/plain"})
+    assert r.status == 415
+    assert (await client.post("/stop")).status == 415
+    assert robot.sent == []
+    await client.close()
+
+
+async def test_cross_origin_post_refused(make_client):
+    client, _, robot = await make_client()
+    r = await client.post("/stop", json={}, headers={"Origin": "https://evil.example"})
+    assert r.status == 403
+    assert robot.sent == []
+    own = f"http://{client.host}:{client.port}"
+    assert (await client.post("/stop", json={}, headers={"Origin": own})).status == 200
+    await client.close()
+
+
+async def test_unknown_host_refused(make_client, config):
+    # DNS rebinding: a page on evil.example resolving to 127.0.0.1
+    client, _, _ = await make_client()
+    assert (await client.get("/status", headers={"Host": "evil.example:8765"})).status == 403
+    config.allowed_hosts = ["robot.example.org"]
+    assert (await client.get("/status", headers={"Host": "robot.example.org"})).status == 200
     await client.close()
