@@ -1,0 +1,1 @@
+{"clean_on": true, "support_continue": true, "start_type": 1, "clean_mode": 3, "force_clean": false, "is_custom": true, "clean_order": true, "dust_collection": true, "area_list": [{"id": 2, "type": "room", "clean_number": 1, "suction": 2, "cistern": 2, "clean_type": 0, "density": 1}]}
