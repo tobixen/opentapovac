@@ -20,6 +20,7 @@ Dates are when things were found out.
 | [network.md](network.md) | Putting the robot on an isolated IoT network, WireGuard for remote access |
 | [research.md](research.md) | Initial research: known problems, Valetudo, Matter, existing integrations |
 | [original-questions.md](original-questions.md) | The questions that started it |
+| [vacuum-review.md](vacuum-review.md) | The author's user review of the robot (Norwegian, 2/5 stars) |
 | [tapo-render-map.py](tapo-render-map.py) | Prototype map renderer (`getMapData`/`getPathData` dump → PNG) |
 
 The notes are written in the first person in places; "the user" and
