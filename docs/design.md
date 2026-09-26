@@ -252,12 +252,19 @@ Where the build differs from the text above:
 
 * **Idle** (safe to send the next run) is 16, or 5/6 held for `settle`
   (60 s), not "5/6 seen twice": in the evening log the robot sat at 5 for
-  ~30 s after coming home and then went on to wash the mop.  Standby (0)
-  without an error, held as long, also counts, with a warning — the robot
-  reported standby on the dock at 100 % on 2026-09-26.
-* **Err 21 is not the end of the run**: the robot went home by itself
-  ~90 s later both times it happened.  Standby during a run counts as
-  given up only after `gave_up_after` (300 s).
+  ~30 s after coming home and then went on to wash the mop.  Before a
+  send, standby (0) without an error, held as long, also counts, with a
+  warning — the robot reported standby on an unpowered dock on
+  2026-09-26.  During a run it does not: the robot also stands in standby
+  off the dock (at a doorstep, waiting to be carried), so there it counts
+  only as giving up, after `gave_up_after`.  A run that goes back to the
+  base without ever cleaning fails after `start_timeout`.
+* **Err 21 is not the end of the job**: the robot went home by itself
+  ~90 s later once (2026-09-25); on 2026-09-26 it was carried to the dock
+  after ~40 s and then ended the run there, unfinished.  Standby during a
+  run counts as given up only after `gave_up_after` (300 s); a run that
+  ends after err 21 without going out again is reported as maybe
+  unfinished (alert).
 * **Stop** is the app's stop payload (protocol.md); the robot heads home
   by itself afterwards.  **Home** (`setSwitchCharge`) is from the app and
   not yet sent; the web page has no button for it.

@@ -131,6 +131,16 @@ Everything was read back and compared afterwards.
   failed before sending anything: python-kasa's TPAP handshake breaks when
   gmpy2 is installed (fixed on our branch, d7d4ed5; upstream
   <https://github.com/ZeliardM/python-kasa/pull/7>).
+* 2026-09-26 20:35: boys room, outer hall, hall, kjøkken, vacuum then
+  mop, one run (`opentapovac clean --vac-then-mop … --wait`, via the
+  daemon).  Vacuum 20:35–20:45, mops fitted and washed, mop pass
+  20:48–20:59, then home, apparently for a mop wash: err 21 at 21:04.
+  Carried to the dock after ~40 s; it docked 20 s later, but then cut
+  hair, emptied dust, washed the mop and dried: **the run was abandoned**.
+  The robot's clean record: 18 min, 11 m², one mop wash, error 0
+  (`getCleanRecords`, `notify_event` 20).  `getPathData` held only 14
+  points (the last stretch to the dock): the track had been cleared.
+  Afterwards the base lost power again (standby, battery falling).
 
 ## Next steps
 

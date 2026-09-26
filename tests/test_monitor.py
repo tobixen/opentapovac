@@ -250,3 +250,67 @@ def test_carry_out_not_asked_while_washing_the_mop_before_the_start():
     m = Monitor(sent_at=0, params=P, room="living room", carry_out=True)
     assert asks(m, [obs(20, 15, recharging=True), obs(40, 17, recharging=True)]) == []
     assert asks(m, [obs(60, 1), obs(80, 4)]) == ["carry_out"]
+
+
+def test_done_after_losing_the_dock_is_flagged():
+    # 2026-09-26 evening: err 21 on a trip home mid-run, carried to the dock, run abandoned
+    m = Monitor(sent_at=0, params=P)
+    events = feed(m, [obs(20, 1), obs(600, 4), obs(840, 0, 21), obs(860, 0), obs(880, 4), obs(900, 19), obs(1000, 16)])
+    assert m.phase == "done"
+    assert "unfinished" in m.message
+    assert [e.level for e in events if e.code == "maybe_unfinished"] == ["alert"]
+
+
+def test_dock_lost_then_back_out_is_not_flagged():
+    m = Monitor(sent_at=0, params=P)
+    feed(
+        m,
+        [
+            obs(20, 1),
+            obs(600, 4),
+            obs(840, 0, 21),
+            obs(880, 4),
+            obs(900, 15),
+            obs(1000, 1),
+            obs(1600, 4),
+            obs(1700, 16),
+        ],
+    )
+    assert m.phase == "done"
+    assert m.message == ""
+
+
+def test_going_home_at_the_start_is_not_leaving_the_dock():
+    # from standby off the dock it first goes to the base to fit the mop (4 -> 17 -> 15 -> 1)
+    m = Monitor(sent_at=0, params=P)
+    feed(m, [obs(20, 4), obs(40, 17), obs(60, 15), obs(80, 16)])
+    assert m.phase == "running"
+
+
+def test_standby_mid_run_is_not_done():
+    # review finding: error-free standby off the dock ended a run as "done" after `settle`
+    m = Monitor(sent_at=0, params=P)
+    feed(m, [obs(20, 1), obs(40, 0), obs(100, 0), obs(200, 0)])
+    assert m.phase == "running"
+    feed(m, [obs(400, 0)])
+    assert m.phase == "failed"
+    assert "base" in m.message  # standby without an error: an unpowered dock is the likely cause
+
+
+def test_standby_at_the_doorstep_keeps_the_question_open():
+    m = Monitor(sent_at=0, params=P, room="bedroom 2", carry_in=True)
+    feed(m, [obs(20, 5), obs(40, 1)])
+    assert m.ask.code == "carry_in"
+    feed(m, [obs(60, 0), obs(120, 0), obs(400, 0), obs(2000, 0)])
+    assert m.phase == "running"
+    assert m.ask is not None
+
+
+def test_back_at_the_base_without_cleaning_fails():
+    # review finding: 17 -> 15 (err 26) -> 6 stayed "running" for ever
+    m = Monitor(sent_at=0, params=P)
+    feed(m, [obs(20, 17), obs(40, 15, 26), obs(60, 6), obs(150, 6)])
+    assert m.phase == "running"
+    feed(m, [obs(200, 6)])
+    assert m.phase == "failed"
+    assert "without cleaning" in m.message

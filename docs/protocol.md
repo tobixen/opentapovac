@@ -267,6 +267,25 @@ From the app, not yet sent:
   going home → fitting mop → washing mop → cleaning (4 → 17 → 15 → 1):
   the robot goes to the base to fit the mop first.
 
+### Track and clean records — read 2026-09-26
+
+* `getPathData {"start_pos": n}` returns only the entries from n on:
+  `path_id`, `start_pos`, `point_counts` (in this reply), `total_points`,
+  `pos_len`, `pos_array` (LZ4 block of big-endian int16 x, y pairs).
+  Entry 0 of the list is a header, `(1, 0)` (seen before as `(377, -8),
+  (1, 0)`); a reply from n > 0 has none.  The track is cleared now and
+  then: after a 25-minute run with a carry to the dock, 14 points were
+  left, all on the last stretch; `path_id` 188 before and after.
+* `getCleanRecords` → `total_time`, `total_area`, `total_number`,
+  `lastest_day_record` `[timestamp, minutes, m², runs]` (today),
+  `record_list[]`: `timestamp` (start, Unix), `clean_time` (min),
+  `clean_area` (m²), `error`, `clean_type`, `wash_times`, `task_type`,
+  `start_type`, `is_custom`, `dust_collection`, `notify_event`,
+  `highlight_list`, `record_index`.  The 2026-09-26 20:35 run (sent as
+  `clean_type` 3) is recorded as `clean_type` 2.  The area seems to count
+  the vacuum and mop passes separately.  `notify_event` meaning unknown
+  (20: the run abandoned after err 21; 24, 28 otherwise).
+
 ### Map lock and relocation — verified 2026-09-25
 
 * Lock: `setMapInfo {"map_list": [{"map_id": <id>, "map_locked": true}]}`

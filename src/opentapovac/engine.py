@@ -361,6 +361,8 @@ class Engine:
                     self._emit(ev.level, ev.msg, ev.code, job)
                 await self._poll_track(job)
                 if m.phase == "done":
+                    if m.message:
+                        job.message = m.message
                     return
                 if m.phase == "failed":
                     raise JobFailed(m.message)

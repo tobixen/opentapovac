@@ -7,7 +7,10 @@ spec, both from that log:
 * Idle/done is 16, or 5/6 held for `settle` seconds.  "5 seen twice" is not
   enough: after a run the robot showed 5 for ~30 s before washing the mop.
 * Standby with err 21 (dock not found) is not the end: the robot retried by
-  itself ~90 s later, twice.  It counts as given up after `gave_up_after`.
+  itself ~90 s later once (2026-09-25).  It counts as given up after
+  `gave_up_after`.  On 2026-09-26 it was carried to the dock after ~40 s
+  and then ended the run there, mid-way: a run that ends after err 21
+  without going out again is reported as maybe unfinished.
 
 Carry rooms (docs/design.md §3) are one room per run, so the monitor knows
 where the robot is without a position: in a `carry_out` run, heading home
@@ -28,7 +31,6 @@ from typing import Any
 
 from .codes import error_text, status_text
 
-LEFT_DOCK = {1, 4}  # cleaning, going home
 STARTED = {1, 4, 15, 17}  # 15/17: mop washing/fitting at the start of a mop pass
 CHARGING = {5, 6}
 DRYING = 16
@@ -92,18 +94,20 @@ class IdleWatch:
     """True once the robot is idle: drying (16), or charging/charged held for `settle` s.
 
     Standby without an error (0, seen with the base unpowered) also counts once
-    it has held for `settle` s; `standby` then tells the caller.
+    it has held for `settle` s, unless `standby_ok` is off; `standby` then tells
+    the caller.  Before a send that is right; during a run it is not, since the
+    robot also stands in standby off the dock (at a doorstep, say).
     """
 
-    def __init__(self, settle: float):
-        self.settle = settle
+    def __init__(self, settle: float, standby_ok: bool = True):
+        self.settle, self.standby_ok = settle, standby_ok
         self._since: float | None = None
         self.standby = False
 
     def feed(self, o: Observation) -> bool:
         if o.status == DRYING:
             return True
-        self.standby = o.status == 0 and not o.errors
+        self.standby = self.standby_ok and o.status == 0 and not o.errors
         if o.status in CHARGING or self.standby:
             if self._since is None:
                 self._since = o.t
@@ -115,7 +119,7 @@ class IdleWatch:
 ERROR_LEVELS = {
     3: ("alert", "stuck", "stuck — needs a human"),
     4: ("info", "lifted", "lifted (wheels off the floor)"),
-    21: ("warn", "dock_not_found", "dock not found — waiting for it to retry"),
+    21: ("alert", "dock_not_found", "dock not found — carry it to the dock unless it tries again by itself"),
     26: ("warn", "water_empty", "clean water tank in the base is empty"),
 }
 
@@ -149,6 +153,8 @@ class Monitor:
         # carry_out: ask on the next trip home; armed once it is out cleaning, since
         # recharge_status reads 1 while it washes the mop at the start of a run
         self._out_armed = False
+        self._lost_dock = False  # err 21 since it last went out cleaning
+        self._seen_errors: set[int] = set()
         self._at_base = True  # carry_in: ask when it next leaves the base; sent from the dock
         self._left_dock = False
         self._status: int | None = None
@@ -156,7 +162,8 @@ class Monitor:
         self._relocating = False
         self._mapping = False
         self._standby_since: float | None = None
-        self._idle = IdleWatch(params.settle)
+        self._idle = IdleWatch(params.settle, standby_ok=False)
+        self._base_since: float | None = None  # back at the base without having cleaned
 
     def step(self, o: Observation) -> list[Event]:
         if self.phase in ("done", "failed"):
@@ -193,20 +200,37 @@ class Monitor:
         if self.phase != "running":
             return ev
 
-        self._left_dock |= o.status in LEFT_DOCK
+        # not "going home": from standby off the dock a run starts by going to the base for the mop
+        self._left_dock |= o.status == CLEANING
+        self._seen_errors.update(o.errors)
+        if 21 in o.errors:
+            self._lost_dock = True
+        elif o.status == CLEANING:
+            self._lost_dock = False
         if o.status == 0 and self.ask is None:
             if self._standby_since is None:
                 self._standby_since = o.t
             elif o.t - self._standby_since > self.p.gave_up_after:
-                why = ", ".join(error_text(e) for e in o.errors) or "no error given"
+                why = ", ".join(error_text(e) for e in o.errors) or "no error given: is the base powered?"
                 return ev + self._fail(f"robot gave up ({why})")
         else:
             self._standby_since = None
         ev += self._carry(o)
         self._check_due(o)
+        if not self._left_dock and o.status in CHARGING | {DRYING}:
+            if self._base_since is None:
+                self._base_since = o.t
+            elif o.t - self._base_since >= self.p.start_timeout:
+                why = ", ".join(error_text(e) for e in self._seen_errors) or "no error given"
+                return ev + self._fail(f"robot went back to the base without cleaning ({why})")
+        else:
+            self._base_since = None
         if self._idle.feed(o) and self._left_dock:
             self.phase = "done"
             ev.append(Event("info", "done", "run finished, robot is back on the dock"))
+            if self._lost_dock:
+                self.message = "the run ended after the robot lost the dock; it may be unfinished"
+                ev.append(Event("alert", "maybe_unfinished", self.message))
         return ev
 
     def _carry(self, o: Observation) -> list[Event]:
@@ -222,7 +246,11 @@ class Monitor:
             if o.status == GOING_HOME or (o.recharging and o.status not in AT_BASE):
                 if self._out_armed:
                     self._out_armed = False
-                    return self._ask("carry_out", f"the robot wants to go home: carry it out of {self.room}", ["done"])
+                    return self._ask(
+                        "carry_out",
+                        f"the robot wants to go home: carry it out of {self.room} (press its button if it doesn't go on)",
+                        ["done"],
+                    )
             elif o.status == CLEANING:
                 self._out_armed = True
         if self.carry_in:
@@ -230,7 +258,11 @@ class Monitor:
                 self._at_base = True
             elif o.status == CLEANING and self._at_base:
                 self._at_base = False
-                return self._ask("carry_in", f"the robot is heading for {self.room}: carry it in", ["done", "skip"])
+                return self._ask(
+                    "carry_in",
+                    f"the robot is heading for {self.room}: carry it in (press its button if it doesn't go on)",
+                    ["done", "skip"],
+                )
         return []
 
     def _ask(self, code: str, text: str, choices: list[str]) -> list[Event]:
@@ -243,7 +275,7 @@ class Monitor:
             self._carried, self._steady_since = True, None
         self.ask, self._lifted = None, False
         self._standby_since = None
-        self._idle = IdleWatch(self.p.settle)
+        self._idle = IdleWatch(self.p.settle, standby_ok=False)
 
     def _check_due(self, o: Observation) -> None:
         if not self._carried:
