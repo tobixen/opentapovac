@@ -9,13 +9,18 @@ import base64, colorsys, json, struct, sys
 import lz4.block
 from PIL import Image, ImageDraw
 
+def load(fn):  # raw `kasa --json` output starts with WARNING lines
+    s = open(fn).read()
+    return json.loads(s[s.find("{"):])
+
 args = sys.argv[1:]
 path = None
 if "--path" in args:
     i = args.index("--path")
     if i + 1 >= len(args): sys.exit(__doc__)
     path = args[i + 1]; del args[i:i + 2]
-d = json.load(open(args[0]))["getMapData"]
+if len(args) < 2: sys.exit(__doc__)
+d = load(args[0])["getMapData"]
 w, h, res = d["width"], d["height"], d["resolution"]
 raw = lz4.block.decompress(base64.b64decode(d["map_data"]), uncompressed_size=d["pix_len"])
 names = {}
@@ -56,7 +61,7 @@ for a in d["area_list"]:  # no-go zones and virtual walls
     elif a.get("type") == "virtual_wall" and len(pts) == 2:
         dr.line(pts, fill=(220, 0, 0), width=4)
 if path:  # app: oe1/a.java b()/h(); low 2 bits of x and y are the point type
-    pd = json.load(open(path))["getPathData"]
+    pd = load(path)["getPathData"]
     buf = lz4.block.decompress(base64.b64decode(pd["pos_array"]), uncompressed_size=pd["pos_len"])
     # the first 8 bytes are not track points (always 377,-8 / 1,0 here)
     pts = [struct.unpack_from(">hh", buf, i) for i in range(8, len(buf) - 3, 4)]
@@ -67,7 +72,7 @@ if path:  # app: oe1/a.java b()/h(); low 2 bits of x and y are the point type
 for key, col, lab in (("real_charge_coor", (0, 150, 0), "dock"),
                       ("real_vac_coor", (200, 0, 0), "robot"),
                       ("goto_point", (0, 0, 200), "goto")):
-    if not d.get(key): continue  # e.g. no goto_point while idle
+    if not any(d.get(key, [])[:2]): continue  # no goto_point while idle; robot at [0, 0, 0] while docked
     x, y = p(d[key]); dr.ellipse((x - 5, y - 5, x + 5, y + 5), fill=col); dr.text((x + 7, y - 5), lab, fill=col)
 img.save(args[1])
 print("pixel values:", sorted(set(raw)))
