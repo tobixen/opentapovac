@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import struct
 from pathlib import Path
 
 import lz4.block
@@ -48,6 +49,25 @@ def make_map(width=20, height=10, rooms=None, **extra) -> dict:
     return d
 
 
+def path_reply(path_id, raw, start=0) -> dict:
+    """A getPathData reply over the robot-side point list `raw` (header entry included), from `start`."""
+    buf = b"".join(struct.pack(">hh", *p) for p in raw[start:])
+    packed = lz4.block.compress(buf, store_size=False)
+    return {
+        "path_id": path_id,
+        "start_pos": start,
+        "point_counts": len(raw) - start,
+        "total_points": len(raw),
+        "pos_len": len(buf),
+        "pos_lz4len": len(packed),
+        "pos_array": base64.b64encode(packed).decode(),
+    }
+
+
+def record(ts, minutes=18, area=11, **kw) -> dict:
+    return {"timestamp": ts, "clean_time": minutes, "clean_area": area, "error": 0, "wash_times": 1, **kw}
+
+
 def vac(status, *errors):
     return {"status": status, "err_status": list(errors)}
 
@@ -66,6 +86,12 @@ class FakeRobot(Robot):
             "map_list": [{"map_id": 42, "map_locked": 1}],
         }
         self.map_data_reply = map_data or make_map()
+        #: (path_id, robot-side points incl. the header entry), or None: getPathData fails
+        self.path = None
+        self.path_calls = []
+        self.records = []
+        #: appended to `records` when a run is sent
+        self.next_record = None
 
     async def _raw(self, method, params):
         if method in self.fail:
@@ -83,7 +109,14 @@ class FakeRobot(Robot):
         if method == "getMapData":
             return self.map_data_reply
         if method == "getPathData":
-            raise RobotError("no path")
+            if self.path is None:
+                raise RobotError("no path")
+            self.path_calls.append(params["start_pos"])
+            return path_reply(*self.path, params["start_pos"])
+        if method == "getCleanRecords":
+            return {"record_list": list(self.records)}
+        if method == "runCleanTask" and params.get("clean_on") and self.next_record:
+            self.records.append(self.next_record)
         self.sent.append((method, params))
         return None
 

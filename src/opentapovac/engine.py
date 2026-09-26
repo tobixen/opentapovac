@@ -26,6 +26,7 @@ from .payloads import HOME, STOP, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
 from .rooms import Room, RoomTable
+from .tracks import CleanRecords, Track, describe_record
 
 __all__ = ["AnswerError", "Busy", "Engine", "Job", "JobRequest", "PlanError"]
 
@@ -100,12 +101,27 @@ class Engine:
         self.jobs: dict[str, Job] = {}
         self._task: asyncio.Task | None = None
         self._png: bytes | None = None
+        self.records = CleanRecords(config.clean_records_file)
+        #: the track of the last job or app run; the map shows it
+        self.track: Track | None = self._last_track()
+        self._track_failed = False
+        #: the watcher follows the robot outside jobs
+        self._watching = False
         self.params = MonitorParams(config.start_timeout, config.settle, config.gave_up_after, config.verify_after)
 
     # --- planning ---
 
     def plan(self, req: JobRequest, warnings: list[str] | None = None) -> list[Run]:
         return plan(req, self.rooms, self.config, warnings)
+
+    def _last_track(self) -> Track | None:
+        files = sorted(self.config.tracks_dir.glob("*.json"), key=lambda f: f.stat().st_mtime)
+        for f in reversed(files):
+            try:
+                return Track.load(f)
+            except (OSError, ValueError, KeyError):
+                continue
+        return None
 
     # --- jobs ---
 
@@ -146,11 +162,14 @@ class Engine:
             self._emit("warn", w, "plan_warning", job)
         try:
             await self._preflight(job)
+            self.track, self._track_failed = Track(self.config.tracks_dir / f"{job.id}.json"), False
             for i, run in enumerate(job.runs):
                 job.step = i + 1
                 await self._wait_idle(job)
                 await self._send(job, run)
                 await self._follow(job, run)
+                await self._poll_track(job)
+                await self._fetch_records(job)
             job.state = "done"
             self._emit("info", f"job {job.id} done", "job_done", job)
         except asyncio.CancelledError:
@@ -166,6 +185,60 @@ class Engine:
         finally:
             job.question = job._answer = None
             job.finished = datetime.now(UTC).isoformat(timespec="seconds")
+            # the robot may still be busy (mop wash, a stuck run): the watcher follows it from here
+            self._watching = True
+
+    # --- what the robot forgets ---
+
+    async def _poll_track(self, job: Job | None) -> None:
+        if self.track is None:
+            return
+        try:
+            await self.track.poll(self.robot)
+        except RobotError as e:
+            if not self._track_failed:  # once per track
+                self._track_failed = True
+                self._emit("warn", f"could not fetch the track: {e}", "track_failed", job)
+
+    async def _fetch_records(self, job: Job | None, report: bool = True) -> None:
+        try:
+            new = await self.records.fetch(self.robot)
+        except RobotError as e:
+            _LOGGER.debug("getCleanRecords: %s", e)
+            return
+        for r in new if report else []:
+            self._emit("info", f"robot's record: {describe_record(r)}", "clean_record", job)
+
+    async def watch_step(self) -> None:
+        """One look at the robot outside jobs: record the track of a run from the app, or of a job's tail."""
+        if self.busy:
+            return
+        vac = await self.robot.vac_status()
+        status, errors = vac.get("status"), vac.get("err_status") or []
+        active = status not in (5, 6, 8, 16) and not (status == 0 and not errors)
+        if active and not self._watching:
+            self._watching = True
+            await self._fetch_records(None, report=False)
+            name = datetime.now(UTC).strftime("app-%Y%m%d-%H%M%S.json")
+            self.track, self._track_failed = Track(self.config.tracks_dir / name), False
+            self._emit("info", f"robot is busy without a job ({status_text(status)}); recording its track", "app_run")
+        if active:
+            await self._poll_track(None)
+        elif self._watching:
+            self._watching = False
+            await self._poll_track(None)
+            await self._fetch_records(None)
+
+    async def watch(self) -> None:
+        """The daemon's watcher; runs until cancelled."""
+        while True:
+            try:
+                await self.watch_step()
+            except RobotError as e:
+                _LOGGER.debug("watch: %s", e)
+            except Exception:  # a bug must not end the watcher
+                _LOGGER.exception("watch")
+            await self.sleep(self.config.watch_interval)
 
     # --- humans ---
 
@@ -228,6 +301,7 @@ class Engine:
                 self._emit("warn", "clean water tank in the base is empty", "water_empty", job)
         except RobotError as e:
             self._emit("warn", f"could not read battery/base: {e}", "preflight", job)
+        await self._fetch_records(job, report=False)  # what came before this job
 
     async def _observe(self) -> Observation:
         vac = await self.robot.vac_status()
@@ -285,6 +359,7 @@ class Engine:
                     continue
                 for ev in m.step(o):
                     self._emit(ev.level, ev.msg, ev.code, job)
+                await self._poll_track(job)
                 if m.phase == "done":
                     return
                 if m.phase == "failed":
@@ -353,14 +428,17 @@ class Engine:
         self.rooms.save(self.config.rooms_cache)
 
     async def map_png(self, refresh: bool = False) -> bytes:
-        """The last rendered map with the track; `refresh` fetches it anew."""
+        """The last rendered map with the recorded track (else the robot's own); `refresh` fetches it anew."""
         if self._png is None or refresh:
             md = await self.robot.map_data()
             self._set_rooms(md)
-            try:
-                path = await self.robot.path_data()
-            except RobotError:
-                path = None
             names = {r.id: r.label for r in self.rooms}
-            self._png = mapimg.png_bytes(md, path, names=names)
+            tracks = self.track.points() if self.track else []
+            path = None
+            if not tracks:
+                try:
+                    path = await self.robot.path_data()
+                except RobotError:
+                    pass
+            self._png = mapimg.png_bytes(md, path, names=names, tracks=tracks)
         return self._png

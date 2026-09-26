@@ -21,7 +21,7 @@ def test_docked_robot_not_drawn_at_origin():
 
 
 def test_path_drawn():
-    buf = b"\x00" * 8 + b"".join(struct.pack(">hh", x, y) for x, y in [(100, 100), (800, 100), (800, 400)])
+    buf = struct.pack(">hh", 1, 0) + b"".join(struct.pack(">hh", x, y) for x, y in [(100, 100), (800, 100), (800, 400)])
     path = {"pos_len": len(buf), "pos_array": base64.b64encode(lz4.block.compress(buf, store_size=False)).decode()}
     plain = render(make_map()).tobytes()
     assert render(make_map(), path).tobytes() != plain
@@ -47,3 +47,17 @@ def test_rooms_near():
     assert rooms_near(d, (750, 250)) == {6}
     assert rooms_near(d, (480, 250)) == {1, 6}
     assert rooms_near(d, (5000, 5000)) == set()
+
+
+def test_track_points_header_only_from_the_start():
+    from opentapovac.mapimg import track_points
+    from tests.conftest import path_reply
+
+    raw = [(1, 0), (100, 100), (104, 100), (108, 100)]
+    assert track_points(path_reply(7, raw)) == [(100, 100), (104, 100), (108, 100)]
+    assert track_points(path_reply(7, raw, 2)) == [(104, 100), (108, 100)]
+
+
+def test_render_with_saved_tracks():
+    plain = render(make_map()).tobytes()
+    assert render(make_map(), tracks=[[(100, 100), (800, 100)], [(800, 400), (900, 400)]]).tobytes() != plain

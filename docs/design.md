@@ -286,6 +286,14 @@ Where the build differs from the text above:
   "waiting" until answered or stopped.  `opentapovac answer`, the web
   page, and the terminal of a standalone or `--wait` clean all answer.
 * Extra endpoints: `GET /ping`, `GET /rooms`, `POST /rooms/refresh`.
+* **Track and clean records are kept** (`tracks.py`): the robot's track
+  was cleared mid-run on 2026-09-26 (14 points left of a 25-minute run),
+  so every status poll also fetches the new track points (`getPathData`
+  from `start_pos`, which returns only the points from there on).  After
+  each run, `getCleanRecords` is read and new records go to
+  `clean-records.jsonl` and the log.  Outside jobs the daemon checks the
+  status every `watch_interval` (60 s) and records runs from the app the
+  same way.
 
 ## 10. Decisions (2026-09-26)
 

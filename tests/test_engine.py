@@ -5,7 +5,8 @@ import pytest
 from opentapovac.engine import AnswerError, Busy, Engine, JobRequest, PlanError
 from opentapovac.payloads import STOP
 from opentapovac.rooms import RoomTable
-from tests.conftest import FakeClock, FakeRobot, make_map, vac
+from opentapovac.tracks import Track
+from tests.conftest import FakeClock, FakeRobot, make_map, record, vac
 
 
 def make_engine(config, events, robot, rooms=True):
@@ -297,3 +298,46 @@ async def test_order_applied(config, events):
     job = await engine.run(JobRequest(rooms=["kitchen", "outer hall"]))
     assert job.state == "done", job.message
     assert [a["id"] for a in robot.sent[0][1]["area_list"]] == [6, 1]
+
+
+async def test_run_records_track_and_clean_record(config, events):
+    robot = FakeRobot(A_RUN)
+    robot.path = (7, [(1, 0), (100, 100), (104, 100)])
+    robot.records = [record(100)]
+    robot.next_record = record(200, 18, 11)
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "done", job.message
+    track = Track.load(config.state_dir / "tracks" / f"{job.id}.json")
+    assert track.points() == [[(100, 100), (104, 100)]]
+    [rec] = [r for r in events.recent() if r["code"] == "clean_record"]
+    assert "18 min, 11 m²" in rec["msg"]
+    assert (await engine.map_png(refresh=True)).startswith(b"\x89PNG")
+
+
+async def test_watch_records_app_runs(config, events):
+    robot = FakeRobot([16])
+    robot.path = (7, [(1, 0), (100, 100)])
+    robot.records = [record(100)]
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()
+    assert robot.path_calls == []  # idle: nothing to record
+    robot.statuses = [vac(1)]
+    await engine.watch_step()
+    assert robot.path_calls == [0]
+    robot.records.append(record(300, 5, 3))
+    robot.statuses = [vac(16)]
+    await engine.watch_step()
+    assert "5 min, 3 m²" in next(r["msg"] for r in events.recent() if r["code"] == "clean_record")
+    assert list((config.state_dir / "tracks").glob("app-*.json"))
+
+
+async def test_watch_leaves_jobs_alone(config, events):
+    robot = FakeRobot([16, 1])  # never finishes
+    robot.path = (7, [(1, 0), (100, 100)])
+    engine, _ = make_engine(config, events, robot)
+    await engine.submit(JobRequest(rooms=["kitchen"]))
+    calls = len(robot.path_calls)
+    await engine.watch_step()
+    assert len(robot.path_calls) == calls
+    await engine.stop()

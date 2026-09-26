@@ -46,10 +46,18 @@ def room_names(map_data: dict[str, Any]) -> dict[int, str]:
     return names
 
 
+#: entries at the start of the robot's list that are not track points; seen: 377,-8 then 1,0, or 1,0 alone
+TRACK_HEADER = {(377, -8), (1, 0)}
+
+
 def track_points(path_data: dict[str, Any]) -> list[tuple[int, int]]:
+    """The points of a `getPathData` reply; one from `start_pos` > 0 has no header."""
     buf = lz4.block.decompress(base64.b64decode(path_data["pos_array"]), uncompressed_size=path_data["pos_len"])
-    # the first 8 bytes are not track points (always 377,-8 / 1,0 so far)
-    return [struct.unpack_from(">hh", buf, i) for i in range(8, len(buf) - 3, 4)]
+    pts = [struct.unpack_from(">hh", buf, i) for i in range(0, len(buf) - 3, 4)]
+    if not path_data.get("start_pos"):
+        while pts and pts[0] in TRACK_HEADER:
+            pts.pop(0)
+    return pts
 
 
 def pixels(map_data: dict[str, Any]) -> bytes:
@@ -79,7 +87,9 @@ def render(
     path_data: dict[str, Any] | None = None,
     names: dict[int, str] | None = None,
     scale: int = 4,
+    tracks: list[list[tuple[int, int]]] | None = None,
 ) -> Image.Image:
+    """`tracks`: saved track segments, drawn like the one in `path_data`."""
     d = map_data
     w, h, res = d["width"], d["height"], d["resolution"]
     raw = pixels(d)
@@ -123,8 +133,10 @@ def render(
             dr.text((pts[0][0] + 4, pts[0][1] + 4), f"{a['id']}:{a['type']}", fill=ZONE)
         elif a.get("type") == "virtual_wall" and len(pts) == 2:
             dr.line(pts, fill=ZONE, width=4)
+    segments = list(tracks or [])
     if path_data:
-        pts = track_points(path_data)
+        segments.append(track_points(path_data))
+    for pts in segments:
         for a, b in zip(pts, pts[1:], strict=False):
             t = (b[0] % 4 << 2) + b[1] % 4
             dr.line((p(a), p(b)), fill=TRACK.get(t, TRACK_OTHER), width=2)

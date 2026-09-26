@@ -59,8 +59,12 @@ class Robot:
             map_id = (await self.map_info())["current_map_id"]
         return await self.query("getMapData", {"map_id": map_id, "type": 0})
 
-    async def path_data(self) -> dict[str, Any]:
-        return await self.query("getPathData", {"start_pos": 0})
+    async def path_data(self, start_pos: int = 0) -> dict[str, Any]:
+        """The track since `start_pos` (the robot's own index, header entry included)."""
+        return await self.query("getPathData", {"start_pos": start_pos})
+
+    async def clean_records(self) -> dict[str, Any]:
+        return await self.query("getCleanRecords")
 
 
 class KasaRobot(Robot):

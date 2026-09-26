@@ -193,7 +193,9 @@ async def serve(engine: Engine, listen: str) -> None:
     site = web.TCPSite(runner, host.strip("[]") or "127.0.0.1", int(port))
     await site.start()
     engine.events.emit("info", f"daemon listening on {listen}", code="daemon")
+    watcher = asyncio.create_task(engine.watch())
     try:
         await asyncio.Event().wait()
     finally:
+        watcher.cancel()
         await runner.cleanup()

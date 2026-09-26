@@ -22,3 +22,6 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   own run and ask a human to carry the robot, with a position check
   after carrying it in.  Answers come from the web page, the terminal, or
   `opentapovac answer`.
+- The daemon keeps the robot's track and its clean records (time, area,
+  mop washes) before the robot forgets them, also for runs started from
+  the app; the map shows the recorded track of the last run.

@@ -56,6 +56,8 @@ class Config:
     human_wait_timeout: float = 900
     #: after a carry-in, the robot must be cleaning, not relocating, this long before its position is checked
     verify_after: float = 60
+    #: the daemon checks the robot this often when no job runs (runs from the app, the end of a job)
+    watch_interval: float = 60
 
     def __post_init__(self) -> None:
         if self.daemon_url is None:
@@ -67,6 +69,14 @@ class Config:
     @property
     def events_file(self) -> Path:
         return self.state_dir / "events.jsonl"
+
+    @property
+    def tracks_dir(self) -> Path:
+        return self.state_dir / "tracks"
+
+    @property
+    def clean_records_file(self) -> Path:
+        return self.state_dir / "clean-records.jsonl"
 
     @property
     def rooms_cache(self) -> Path:
@@ -102,7 +112,7 @@ class Config:
 
 
 DURATIONS = ("poll_interval", "settle", "start_timeout", "gave_up_after", "idle_timeout")
-DURATIONS += ("human_wait_timeout", "verify_after")
+DURATIONS += ("human_wait_timeout", "verify_after", "watch_interval")
 _UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
 
 

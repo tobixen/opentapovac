@@ -93,6 +93,12 @@ reports what happens on the way (stuck, dock not found, relocation, empty
 water tank).  With a daemon running, every command goes through it and
 `clean` returns at once; `--wait` follows the job.
 
+The robot keeps only a short track and clears it now and then, so the
+daemon fetches it while a run goes on, also for runs started from the
+app, and keeps it in `~/.local/state/opentapovac/tracks/`, with the robot's
+own clean records (time, area, mop washes) in `clean-records.jsonl` next
+to it.  The map shows the recorded track of the last run.
+
 The daemon binds to localhost.  To reach the web page from phones, put a
 reverse proxy with authentication in front of it; the daemon has no
 accounts of its own.
