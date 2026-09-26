@@ -1,0 +1,5 @@
+# Example and private hosts in the docs, and the robot's LAN address.
+exclude = [
+  '^https?://([^/]*\.)?example\.(com|net|org)',
+  '^https?://(localhost|127\.0\.0\.1|10\.)',
+]

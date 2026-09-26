@@ -1,0 +1,84 @@
+[build-system]
+# argcomplete is a runtime dependency too, but the build needs it as well:
+# hatch_build.py generates the shell completion files from it (see that file).
+requires = ["hatchling", "hatch-vcs", "argcomplete>=3"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opentapovac"
+dynamic = ["version"]
+description = "Local control of a TP-Link Tapo robot vacuum: CLI, daemon and web page"
+readme = "README.md"
+# python-kasa needs 3.11
+requires-python = ">=3.11"
+license = {text = "AGPL-3.0-or-later"}
+authors = [{ name = "Tobias Brox", email = "tobias@redpill-linpro.com" }]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+  # TPAP is not in a python-kasa release yet: the PR branch plus our fix,
+  # see docs/design.md, "Decisions".  A direct reference keeps us off PyPI.
+  "python-kasa @ git+https://github.com/tobixen/python-kasa.git@tpap-rv50-tls-fix",
+  "aiohttp>=3.9",
+  "argcomplete>=3",
+  "lz4>=4",
+  "pillow>=10",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+# hatchling is here so the tests can exercise hatch_build.py
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.16", "pre-commit>=4", "hatchling"]
+
+[project.scripts]
+opentapovac = "opentapovac.cli:main"
+
+[project.urls]
+Repository = "https://github.com/tobixen/opentapovac"
+Issues = "https://github.com/tobixen/opentapovac/issues"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.version]
+source = "vcs"
+# only release tags: the review workflow's backup/pre-review/* tags don't parse as versions
+raw-options = { scm = { git = { describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v*"] } } }
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/opentapovac/_version.py"
+
+# hatch_build.py: generates the bash/zsh completion files into the wheel's
+# shared-data, so tab-completion works with no shell rc editing.
+[tool.hatch.build.hooks.custom]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opentapovac"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "PT"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["opentapovac"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# runs from a bare checkout too (the pre-push hook uses the system pytest)
+pythonpath = ["src", "."]
+python_files = ["test_*.py"]
+filterwarnings = ["error"]
+norecursedirs = ["docs", "build"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
