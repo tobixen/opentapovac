@@ -247,6 +247,26 @@ From the app, not yet sent:
   `setSwitchCharge`, `setGotoDustCollection`, `setSwitchDustCollection`,
   `setWashMopSwitch`, `setDryMopSwitch`, `getBaseStatus`.
 
+### Pause, resume, lifted — sent 2026-09-26
+
+* `setRobotPause {"pause": false}` (resume) and `{"pause": true}` (pause)
+  are accepted (`null`), from the app's home-card start/pause button
+  (`RobotPause`, field `pause`, no `@SerializedName`).  Sent while the
+  robot sat in **standby (0) with err 4 (lifted) still set**, after being
+  lifted out of a run on its way home: no effect, neither alone nor as
+  true, 5 s, false.  Status stayed 0, err [4], `clean_status` 3, for a
+  minute each.  Not yet tried on a paused run (status 7), which is where
+  the app shows the button.
+* Being lifted during a run gives status 7 (paused) + err 4.  On
+  2026-09-25 it resumed by itself ~20 s after being put down; on
+  2026-09-26 (carried into bedroom 2) it did not, and needed the button
+  on the robot.  Lifted again later, it dropped from 7 to standby 0 with
+  err 4 latched; the button then cleared the error and the robot
+  **continued the old run** (it had been heading home: status 4).
+* From standby off the dock, a vacuum-and-mop room run started with
+  going home → fitting mop → washing mop → cleaning (4 → 17 → 15 → 1):
+  the robot goes to the base to fit the mop first.
+
 ### Map lock and relocation — verified 2026-09-25
 
 * Lock: `setMapInfo {"map_list": [{"map_id": <id>, "map_locked": true}]}`

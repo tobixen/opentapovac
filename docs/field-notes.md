@@ -120,6 +120,17 @@ Everything was read back and compared afterwards.
   washes at the base (15:38, 16:01, 16:07); err 26 (base clean water tank
   empty) until the tank was refilled.  Hair cut, dust emptied, drying from
   16:21.  No stuck or lost-dock errors this time.
+* 2026-09-26 09:03: **first run from OpenTapoVac**, bedroom 2 (room 7),
+  vacuum and mop (`opentapovac clean --vac-and-mop`).  The robot was in
+  standby off the dock (base power?), so it went to the base, fitted and
+  washed the mop, and set off 09:07.  Carried into room 7; it paused
+  (err 4) and needed the button to resume (09:09).  Cleaned until 09:16,
+  headed home, was lifted again and carried to the living room, where it
+  sat in standby with err 4.  `setRobotPause` false, and true/false, had
+  no effect (protocol.md); the button then sent it home.  The first try
+  failed before sending anything: python-kasa's TPAP handshake breaks when
+  gmpy2 is installed (fixed on our branch, d7d4ed5; upstream
+  <https://github.com/ZeliardM/python-kasa/pull/7>).
 
 ## Next steps
 
