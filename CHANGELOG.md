@@ -28,6 +28,7 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   with mopping in its own colour, and checkboxes on the web page for
   vacuuming, mopping and movement.
 - A Nix package and a NixOS module (`services.opentapovac`).
+- Releases on PyPI: `pip install opentapovac`.
 - A progress line every minute of a run (percent done, vacuuming or
   mopping, room, battery), and warnings when a vacuum pass is skipped or
   the robot makes no progress for five minutes.

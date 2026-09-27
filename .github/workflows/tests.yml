@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # publish.yml runs it before an upload
+  workflow_call:
 
 jobs:
   test:

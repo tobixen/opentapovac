@@ -35,10 +35,13 @@ in [docs/](docs/).
 
 ## Installation
 
-TPAP support is not in a python-kasa release yet, so the package carries
-its own copy of the TPAP transport from the python-kasa PR branch
-(`src/opentapovac/_tpap.py`, see docs/design.md, "Decisions") and runs it
-on a released python-kasa.
+From PyPI:
+
+```
+pipx install opentapovac     # or: uv tool install opentapovac
+```
+
+From a checkout:
 
 ```
 make install
@@ -47,6 +50,11 @@ make install
 (This auto-detects `uv`, `pipx`, or `pip` and does the right thing.)
 Tab completion for bash and zsh comes with it; bash needs the
 `bash-completion` package.
+
+TPAP support is not in a python-kasa release yet, so the package carries
+its own copy of the TPAP transport from the python-kasa PR branch
+(`src/opentapovac/_tpap.py`, see docs/design.md, "Decisions") and runs it
+on a released python-kasa.
 
 ### NixOS
 
