@@ -158,6 +158,20 @@ Everything was read back and compared afterwards.
   relocations and carries?  Every detour tonight began with a relocation.
   New reads: `getCleanInfo` (percent, minutes, m²), `getMopState`; the
   app's `gotoPoint {"switch", "point"}` found, not sent (protocol.md).
+* 2026-09-28 00:48 (22:48 UTC): outer hall alone, vacuum then mop
+  (daemon on broxbox06, job 1c2410e8).  Relocated at the start (20 s).
+  At 20 % (22:51:50) it **headed home mid vacuum pass**, no error; the
+  heading-home points zig-zag inside the outer hall and never leave it,
+  then standby with "dock not found" (22:52:54).  Carried to the
+  kitchen, not onto the dock: the error cleared and it resumed, back to
+  the outer hall, vacuumed to 100 % and went home by itself.  There it
+  cut hair, washed the mop and dried: **no mop pass**, and the daemon
+  called the job done.  The robot's record: 4 min, 2 m², 1 mop wash.
+  `mop_state` false all through the vacuum pass, true from the base
+  (the mop is fitted only there in this mode).  The track list held
+  `(1, 0)` twice, second after the first point and again at the resume:
+  a sub-path marker, which the map drew as lines to map (0, 0), the
+  original base spot in the living room.
 
 ## Next steps
 
