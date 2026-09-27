@@ -78,7 +78,11 @@ testpaths = ["tests"]
 # runs from a bare checkout too (the pre-push hook uses the system pytest)
 pythonpath = ["src", "."]
 python_files = ["test_*.py"]
-filterwarnings = ["error"]
+filterwarnings = [
+  "error",
+  # passlib (for the vendored TPAP transport) imports crypt on Python < 3.13
+  "ignore:'crypt' is deprecated:DeprecationWarning",
+]
 norecursedirs = ["docs", "build"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
