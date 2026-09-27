@@ -324,6 +324,16 @@ async def test_stop_while_waiting(config, events):
     assert job.question is None
 
 
+async def test_home_ends_the_job_first(config, events):
+    """Else the monitor sees the run end on the dock and may send what it "missed" again."""
+    robot = FakeRobot([16, 1])
+    engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
+    job = await carry_in_job(engine, robot)
+    await engine.home()
+    assert job.state == "stopped"
+    assert robot.sent[-1] == ("setSwitchCharge", {"switch_charge": True})
+
+
 async def test_warns_when_carry_in_room_is_not_first(config, events):
     robot = FakeRobot([16, 1])
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
@@ -707,3 +717,35 @@ async def test_goto_point_and_room(config, events):
     with pytest.raises(PlanError):
         await engine.goto(room="nowhere")
     assert "goto" in [r["code"] for r in events.recent()]
+
+
+async def test_home_mid_run_sends_nothing_again(config, events):
+    robot = forgetful([16, 1, 1, 1, 1, *NO_MOP])
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    await until(lambda: len(_sends(robot)) == 1)
+    await engine.home()
+    assert job.state == "stopped"
+    assert robot.sent[-1] == ("setSwitchCharge", {"switch_charge": True})
+    assert ("runCleanTask", STOP) not in robot.sent
+    assert len(_sends(robot)) == 1
+
+
+async def test_home_command_failing_after_the_job_ended(config, events):
+    robot = FakeRobot([16, 1])
+    engine, _ = make_engine(config, events, robot)
+    robot.fail = {"setSwitchCharge": "-40210"}
+    with pytest.raises(RobotError):
+        await engine.home()
+    assert "home_failed" in [r["code"] for r in events.recent()]
+
+
+async def test_goto_ends_the_job_first(config, events):
+    """Guiding the robot home is a human taking over: no redo when it docks."""
+    robot = forgetful([16, 1, 1, 1, 1, *NO_MOP])
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    await until(lambda: len(_sends(robot)) == 1)
+    await engine.goto(room="kitchen")
+    assert job.state == "stopped"
+    assert robot.sent[-1][0] == "gotoPoint"

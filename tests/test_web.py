@@ -85,6 +85,14 @@ async def test_status_and_map(make_client):
     await client.close()
 
 
+async def test_home(make_client):
+    client, _, robot = await make_client()
+    assert (await client.post("/home", json={})).status == 200
+    assert robot.sent[-1] == ("setSwitchCharge", {"switch_charge": True})
+    assert 'id="home"' in await (await client.get("/")).text()
+    await client.close()
+
+
 async def test_goto(make_client):
     client, _, robot = await make_client()
     assert (await client.post("/goto", json={"x": 300, "y": 200})).status == 200

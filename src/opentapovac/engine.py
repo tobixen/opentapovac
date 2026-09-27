@@ -573,6 +573,12 @@ class Engine:
 
     async def stop(self) -> None:
         """Stop the current job (if any) and the robot's run."""
+        await self._end_job()
+        await self.robot.send("runCleanTask", STOP)
+        self._emit("warn", "stop sent", "stop")
+
+    async def _end_job(self) -> None:
+        """Cancel the current job, if any; the robot is left as it is."""
         if self._task is not None and not self._task.done():
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -581,11 +587,16 @@ class Engine:
             self.job.state = "stopped"
             self.job.question = self.job._answer = None
             self.job.finished = datetime.now(UTC).isoformat(timespec="seconds")
-        await self.robot.send("runCleanTask", STOP)
-        self._emit("warn", "stop sent", "stop")
 
     async def home(self) -> None:
-        await self.robot.send("setSwitchCharge", HOME)
+        """Send the robot to the dock, ending the current job first: its monitor would take the trip
+        home for the end of the run, and what it then finds missed could be sent again."""
+        await self._end_job()
+        try:
+            await self.robot.send("setSwitchCharge", HOME)
+        except RobotError as e:
+            self._emit("alert", f"job ended, but the robot did not take the home command: {e}", "home_failed")
+            raise
         self._emit("info", "sent home (setSwitchCharge, not yet verified on the robot)", "home")
 
     async def goto(self, point: tuple[int, int] | None = None, room: str | None = None) -> tuple[int, int]:
@@ -611,6 +622,7 @@ class Engine:
             where = str(tuple(point))
         if not mapimg.is_floor(md, point):
             raise PlanError(f"{where} is not on the floor (a wall, unknown, a no-go zone or off the map)")
+        await self._end_job()  # a human steers now; as in home()
         await self.robot.send("gotoPoint", goto_payload(*point))
         self._emit("info", f"sent to {where} (gotoPoint)", "goto")
         return point

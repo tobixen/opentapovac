@@ -40,3 +40,5 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   `opentapovac goto ROOM` / `goto X Y`.  Meant for guiding it home when
   it can't find the dock.  Only floor points outside no-go zones are
   sent; not yet tried on the robot from here.
+- A "Return to dock" button on the web page, next to Stop; not yet
+  tried on the robot.  Like going to a spot, it ends the current job.

@@ -284,7 +284,9 @@ Where the build differs from the text above:
   mopped by then.
 * **Stop** is the app's stop payload (protocol.md); the robot heads home
   by itself afterwards.  **Home** (`setSwitchCharge`) is from the app and
-  not yet sent; the web page has no button for it.
+  not yet sent; it ends the current job first (its monitor would take the
+  trip home for the end of the run and might send the rest again), and
+  so does a goto: a human steers the robot then.
 * The web page selects rooms and then starts; the presets start at once.
 * **Carry rooms go first**: each gets a run of its own, before the
   multi-room run, since whoever pressed the button is most likely still

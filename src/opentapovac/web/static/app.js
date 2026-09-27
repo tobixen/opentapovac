@@ -164,6 +164,10 @@ $("stop").onclick = async () => {
   try { await api("POST", "/stop"); } catch (e) { say(e.message); }
   loadStatus();
 };
+$("home").onclick = async () => {
+  try { await api("POST", "/home"); } catch (e) { say(e.message); }
+  loadStatus();
+};
 $("reload").onclick = async () => {
   $("reload").disabled = true;
   try { await api("POST", "/map/refresh"); await loadGeo(); showMap(); } catch (e) { say(e.message); }
