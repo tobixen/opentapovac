@@ -174,7 +174,9 @@ One page, phones first.
 
 HTTP API (the CLI uses it too): `POST /jobs`, `GET /jobs/{id}`,
 `POST /jobs/{id}/answer`, `POST /stop`, `GET /status`, `GET /events`
-(SSE), `GET /map.png?max_age=HOURS&show=vac,mop,move`, `POST /map/refresh`.
+(SSE), `GET /map.png?max_age=HOURS&show=vac,mop,move`, `POST /map/refresh`,
+`GET /map.json` (pixel ↔ mm), `POST /goto` (`{x, y}` in map mm or `{room}`;
+gotoPoint, not yet sent from here).
 
 Framework: aiohttp (python-kasa already depends on it) or Starlette.
 Lean: aiohttp, one dependency less.

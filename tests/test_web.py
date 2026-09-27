@@ -85,6 +85,25 @@ async def test_status_and_map(make_client):
     await client.close()
 
 
+async def test_goto(make_client):
+    client, _, robot = await make_client()
+    assert (await client.post("/goto", json={"x": 300, "y": 200})).status == 200
+    assert robot.sent[-1] == ("gotoPoint", {"switch": True, "point": [300, 200]})
+    r = await client.post("/goto", json={"room": "outer hall"})
+    assert r.status == 200
+    assert (await r.json())["point"] == robot.sent[-1][1]["point"]
+    bad_bodies = [{}, {"room": "nowhere"}, {"x": "a", "y": 1}, {"x": 1}, {"x": True, "y": 200}, {"x": 1e300, "y": 200}]
+    bad_bodies += [["room"], {"x": 4100, "y": 3000}, {"x": 50, "y": 50}]  # a list; off the map; a no-go zone
+    for bad in bad_bodies:
+        assert (await client.post("/goto", json=bad)).status == 400, bad
+    for raw in ("{", '{"x": Infinity, "y": 1}'):
+        r = await client.post("/goto", data=raw, headers={"Content-Type": "application/json"})
+        assert r.status == 400, raw
+    geo = await (await client.get("/map.json")).json()
+    assert set(geo) == {"origin", "resolution", "width", "height", "scale"}
+    await client.close()
+
+
 async def test_map_options_reach_the_engine(make_client, config):
     client, _, _ = await make_client()
     config.tracks_dir.mkdir(parents=True)

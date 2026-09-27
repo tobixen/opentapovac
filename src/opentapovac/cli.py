@@ -16,6 +16,7 @@ import contextlib
 import fcntl
 import logging
 import os
+import re
 import sys
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import asdict
@@ -82,6 +83,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="robot status")
     sub.add_parser("stop", help="stop the current run")
     sub.add_parser("home", help="send the robot to the dock (setSwitchCharge, not yet verified)")
+    g = sub.add_parser("goto", help="send the robot to a room, or to a point in map mm (gotoPoint, not yet verified)")
+    g.add_argument("target", nargs="+", metavar="ROOM | X Y")
     r = sub.add_parser("rooms", help="list rooms")
     r.add_argument("--refresh", action="store_true", help="read the rooms from the robot")
     lg = sub.add_parser("log", help="recent events")
@@ -279,6 +282,13 @@ def print_rooms(rooms: list[dict[str, Any]]) -> None:
         print(f"{r['id']:>3}  {r['label']}" + (f"  ({', '.join(flags)})" if flags else ""))
 
 
+def goto_target(words: list[str]) -> tuple[tuple[int, int] | None, str | None]:
+    """`X Y` (two integers, map mm) or a room name."""
+    if len(words) == 2 and all(re.fullmatch(r"-?\d+", w) for w in words):
+        return (int(words[0]), int(words[1])), None
+    return None, " ".join(words)
+
+
 async def via_daemon(args: argparse.Namespace, config: Config, dc: DaemonClient) -> int:
     cmd = args.command
     if cmd == "clean":
@@ -311,6 +321,9 @@ async def via_daemon(args: argparse.Namespace, config: Config, dc: DaemonClient)
         await dc.stop()
     elif cmd == "home":
         await dc.home()
+    elif cmd == "goto":
+        point, room = goto_target(args.target)
+        print("sent to", await dc.goto(point, room))
     elif cmd == "rooms":
         print_rooms((await dc.rooms(refresh=args.refresh))["rooms"])
     elif cmd == "map":
@@ -365,6 +378,9 @@ async def standalone(args: argparse.Namespace, config: Config) -> int:
             await engine.stop()
         elif cmd == "home":
             await engine.home()
+        elif cmd == "goto":
+            point, room = goto_target(args.target)
+            print("sent to", list(await engine.goto(point, room)))
         elif cmd == "rooms":
             if args.refresh or not len(engine.rooms):
                 await engine.refresh_rooms()

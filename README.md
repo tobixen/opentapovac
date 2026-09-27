@@ -110,6 +110,7 @@ opentapovac clean --mop --sequential hall 6 # one run per room
 opentapovac status | stop | rooms | log
 opentapovac answer done                     # "carry the robot into ..."
 opentapovac map map.png                     # map with the last 12 h of tracks
+opentapovac goto hall | goto 4100 3000      # send it to a room or a point (mm)
 opentapovac serve                           # the daemon and the web page
 ```
 

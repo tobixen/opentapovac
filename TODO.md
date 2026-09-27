@@ -42,6 +42,8 @@
   fitted only after it there, so either reading fits.  Still open for
   app runs that vacuum with the mop fitted; the map and the missed-mop
   check both lean on it.
+* **`goto ROOM` can pick a spot next to a wall**: the room pixel nearest
+  its centroid.  Prefer the one farthest from the room's edge.
 * **Draw the tracks in the browser.**  Serve the map without tracks (it
   rarely changes) and `/tracks.json` with the lines and the map geometry
   (origin, resolution, height), and draw them on a `<canvas>` over the

@@ -36,3 +36,7 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   sent once more; when it leaves a run unfinished, the web page asks
   whether to send it again.  Not with the battery low or the water tank
   empty.  `redo_missed: false` in the config turns this off.
+- Send the robot to a room or a spot: tap the map on the web page, or
+  `opentapovac goto ROOM` / `goto X Y`.  Meant for guiding it home when
+  it can't find the dock.  Only floor points outside no-go zones are
+  sent; not yet tried on the robot from here.

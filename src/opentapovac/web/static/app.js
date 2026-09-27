@@ -125,6 +125,21 @@ function showMap() {
   $("map").src = "/map.png?" + q;
 }
 
+// map pixels -> map mm (GET /map.json); the inverse of mapimg.render's p()
+let geo = null;
+async function loadGeo() { try { geo = await api("GET", "/map.json"); } catch (e) { geo = null; } }
+
+$("map").onclick = async (e) => {
+  const img = $("map");
+  if (!geo) await loadGeo();  // it failed at load time
+  if (!geo || !img.naturalWidth) { say("the map's geometry is not available"); return; }
+  const px = e.offsetX * img.naturalWidth / img.clientWidth, py = e.offsetY * img.naturalHeight / img.clientHeight;
+  const x = Math.round(geo.origin[0] + px / geo.scale * geo.resolution);
+  const y = Math.round(geo.origin[1] + (geo.height - 1 - py / geo.scale) * geo.resolution);
+  if (!confirm(`Send the robot to this spot (${x}, ${y})?`)) return;
+  try { await api("POST", "/goto", {x, y}); say(""); } catch (err) { say(err.message); }
+};
+
 // the map options are remembered per browser; storage may be unavailable
 function mapOpts(save) {
   try {
@@ -151,7 +166,7 @@ $("stop").onclick = async () => {
 };
 $("reload").onclick = async () => {
   $("reload").disabled = true;
-  try { await api("POST", "/map/refresh"); showMap(); } catch (e) { say(e.message); }
+  try { await api("POST", "/map/refresh"); await loadGeo(); showMap(); } catch (e) { say(e.message); }
   $("reload").disabled = false;
 };
 
@@ -159,5 +174,6 @@ loadRooms().catch((e) => say(e.message));
 loadStatus();
 follow();
 mapOpts();
+loadGeo();
 showMap();
 setInterval(loadStatus, 30000);

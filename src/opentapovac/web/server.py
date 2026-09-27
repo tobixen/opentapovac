@@ -168,6 +168,31 @@ async def home(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+@routes.post("/goto")
+async def goto(request: web.Request) -> web.Response:
+    """`{"x": mm, "y": mm}` in the map's frame, or `{"room": name}`: send the robot there."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return _error(400, "body must be JSON")
+    if not isinstance(body, dict):
+        return _error(400, "body must be a JSON object")
+    engine = request.app[ENGINE]
+    if "room" in body:
+        point = await engine.goto(room=str(body["room"]))
+    else:
+        x, y = body.get("x"), body.get("y")
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (x, y)):
+            return _error(400, 'goto takes {"x": mm, "y": mm} (integers) or {"room": name}')
+        point = await engine.goto((x, y))
+    return web.json_response({"ok": True, "point": list(point)})
+
+
+@routes.get("/map.json")
+async def map_json(request: web.Request) -> web.Response:
+    return web.json_response(await request.app[ENGINE].map_geometry())
+
+
 @routes.get("/status")
 async def status(request: web.Request) -> web.Response:
     return web.json_response(await request.app[ENGINE].status())

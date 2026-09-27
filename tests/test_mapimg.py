@@ -76,3 +76,30 @@ def test_render_breaks_at_the_sub_path_marker():
     two = render(make_map(), tracks=[[(100, 100), (800, 100)], [(800, 400), (900, 400)]]).tobytes()
     marked = [[(100, 100), (800, 100), (1, 0), (800, 400), (900, 400)]]
     assert render(make_map(), tracks=marked).tobytes() == two
+
+
+def test_room_spot_is_on_the_room():
+    from opentapovac.mapimg import room_spot, rooms_near
+
+    m = make_map()  # room 1 the left half, room 6 the right half, 50 mm pixels
+    for rid in (1, 6):
+        assert rooms_near(m, room_spot(m, rid), 10) == {rid}
+    assert room_spot(m, 99) is None
+
+
+def test_is_floor():
+    import base64
+
+    import lz4.block
+
+    from opentapovac.mapimg import is_floor, pixels
+
+    m = make_map()  # 1000 × 500 mm, a no-go zone over 0–100 mm
+    assert is_floor(m, (300, 200))
+    assert not is_floor(m, (50, 50))  # the no-go zone
+    assert not is_floor(m, (-100, 0))  # off the map
+    assert not is_floor(m, (4100, 3000))
+    raw = bytearray(pixels(m))
+    raw[4 * 20 + 6] = 0  # a wall at column 6, row 4: (300, 200)
+    m["map_data"] = base64.b64encode(lz4.block.compress(bytes(raw), store_size=False)).decode()
+    assert not is_floor(m, (300, 200))

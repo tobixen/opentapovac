@@ -23,10 +23,10 @@ from .codes import error_text, status_text
 from .config import Config
 from .events import EventLog
 from .monitor import CLEANING, Ask, IdleWatch, Monitor, MonitorParams, Observation
-from .payloads import HOME, STOP, run_payload
+from .payloads import HOME, STOP, goto_payload, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
-from .rooms import Room, RoomTable
+from .rooms import Room, RoomError, RoomTable
 from .tracks import KINDS, CleanRecords, Track, describe_record
 
 __all__ = ["AnswerError", "Busy", "Engine", "Job", "JobRequest", "PlanError"]
@@ -588,6 +588,33 @@ class Engine:
         await self.robot.send("setSwitchCharge", HOME)
         self._emit("info", "sent home (setSwitchCharge, not yet verified on the robot)", "home")
 
+    async def goto(self, point: tuple[int, int] | None = None, room: str | None = None) -> tuple[int, int]:
+        """Send the robot to a map point (mm), or to a spot in `room`; the point sent.
+
+        `gotoPoint` is from the app; the robot followed it when sent from the
+        app while lost on its way home (2026-09-28), but has not yet been sent
+        from here.  Only points on the floor, outside no-go zones, are sent.
+        """
+        md = await self._robot_map()  # also fills the room table on a fresh install
+        if room is not None:
+            try:
+                r = self.rooms.resolve(room)
+            except RoomError as e:
+                raise PlanError(str(e)) from e
+            spot = mapimg.room_spot(md, r.id)
+            if spot is None:
+                raise PlanError(f"{r.label} has no floor on the map")
+            point, where = spot, f"{r.label} {spot}"
+        elif point is None:
+            raise PlanError("goto needs a point or a room")
+        else:
+            where = str(tuple(point))
+        if not mapimg.is_floor(md, point):
+            raise PlanError(f"{where} is not on the floor (a wall, unknown, a no-go zone or off the map)")
+        await self.robot.send("gotoPoint", goto_payload(*point))
+        self._emit("info", f"sent to {where} (gotoPoint)", "goto")
+        return point
+
     async def status(self) -> dict[str, Any]:
         vac = await self.robot.vac_status()
         out: dict[str, Any] = {
@@ -632,6 +659,25 @@ class Engine:
                 continue
         return out
 
+    async def _robot_map(self, fresh: bool = False) -> dict[str, Any]:
+        """The robot's map, fetched once; `fresh` fetches it anew (the old one stays if that fails)."""
+        if self._map_data is None or fresh:
+            md = await self.robot.map_data()
+            self._set_rooms(md)
+            self._map_data = md
+        return self._map_data
+
+    async def map_geometry(self) -> dict[str, Any]:
+        """How the map's pixels relate to map mm: x = origin_x + col × resolution, row 0 at the bottom."""
+        d = await self._robot_map()
+        return {
+            "origin": d["real_origin_coor"][:2],
+            "resolution": d["resolution"],
+            "width": d["width"],
+            "height": d["height"],
+            "scale": mapimg.SCALE,
+        }
+
     async def map_png(
         self, refresh: bool = False, max_age: float | None = MAP_MAX_AGE, show: Collection[str] = KINDS
     ) -> bytes:
@@ -641,9 +687,7 @@ class Engine:
         track is ever recorded, the robot's own track is drawn instead, but only
         with `max_age` None: its age is unknown.
         """
-        if self._map_data is None or refresh:
-            self._map_data = await self.robot.map_data()
-            self._set_rooms(self._map_data)
+        md = await self._robot_map(fresh=refresh)
         since = time.time() - max_age if max_age else 0
         tracks = [line for t in self.recent_tracks(max_age) for line in t.lines(since, show)]
         if not max_age and not any(self.config.tracks_dir.glob("*.json")):
@@ -651,4 +695,4 @@ class Engine:
                 own = mapimg.track_points(await self.robot.path_data())
                 tracks = Track(None, [{"points": own}]).lines(0, show)
         names = {r.id: r.label for r in self.rooms}
-        return mapimg.png_bytes(self._map_data, names=names, tracks=tracks)
+        return mapimg.png_bytes(md, names=names, tracks=tracks)

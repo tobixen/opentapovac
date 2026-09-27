@@ -145,3 +145,17 @@ async def test_terminal_asker_cancelled_by_answer_elsewhere(monkeypatch):
     assert task.cancelled()
     os.close(w)
     stdin.close()
+
+
+def test_goto_target():
+    from opentapovac.cli import goto_target
+
+    assert goto_target(["4100", "-300"]) == ((4100, -300), None)
+    assert goto_target(["outer", "hall"]) == (None, "outer hall")
+    assert goto_target(["kitchen"]) == (None, "kitchen")
+
+
+def test_goto_target_odd_numbers():
+    from opentapovac.cli import goto_target
+
+    assert goto_target(["--5", "3"]) == (None, "--5 3")

@@ -29,6 +29,11 @@ STOP = {
 HOME = {"switch_charge": True}
 
 
+def goto_payload(x: int, y: int) -> dict[str, Any]:
+    """`gotoPoint`, from the app (`GotoPointParams`): a point in the mm frame of `getMapData`."""
+    return {"switch": True, "point": [x, y]}
+
+
 @dataclass(frozen=True)
 class Settings:
     mode: str = "vac_then_mop"

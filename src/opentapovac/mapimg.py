@@ -86,11 +86,48 @@ def rooms_near(map_data: dict[str, Any], xy: tuple[float, float], radius: float 
     return found
 
 
+def room_spot(map_data: dict[str, Any], room_id: int) -> tuple[int, int] | None:
+    """A point (mm) on the floor of a room: its pixel nearest the room's centroid; None without pixels."""
+    d = map_data
+    w, res = d["width"], d["resolution"]
+    cells = [(i % w, i // w) for i, v in enumerate(pixels(d)) if v == room_id]
+    if not cells:
+        return None
+    cx, cy = sum(c for c, _ in cells) / len(cells), sum(r for _, r in cells) / len(cells)
+    col, row = min(cells, key=lambda c: (c[0] - cx) ** 2 + (c[1] - cy) ** 2)
+    ox, oy = d["real_origin_coor"][:2]
+    return int(ox + col * res), int(oy + row * res)
+
+
+def _inside(xy: tuple[float, float], poly: list[list[float]]) -> bool:
+    x, y = xy
+    inside = False
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1], strict=True):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+    return inside
+
+
+def is_floor(map_data: dict[str, Any], xy: tuple[float, float]) -> bool:
+    """The map point `xy` (mm) is on the floor (a room or unassigned floor), outside the no-go zones."""
+    d = map_data
+    w, h, res = d["width"], d["height"], d["resolution"]
+    col, row = round((xy[0] - d["real_origin_coor"][0]) / res), round((xy[1] - d["real_origin_coor"][1]) / res)
+    if not (0 <= col < w and 0 <= row < h) or pixels(d)[row * w + col] in (0, 127):
+        return False
+    zones = (a.get("vertexs", []) for a in d.get("area_list", []) if a.get("type") == "forbid")
+    return not any(len(z) >= 3 and _inside(xy, [v[:2] for v in z]) for z in zones)
+
+
+#: pixels per map pixel in the rendered map
+SCALE = 4
+
+
 def render(
     map_data: dict[str, Any],
     path_data: dict[str, Any] | None = None,
     names: dict[int, str] | None = None,
-    scale: int = 4,
+    scale: int = SCALE,
     tracks: list[list[tuple[int, int]]] | list[list[tuple[int, int, str | None]]] | None = None,
 ) -> Image.Image:
     """`tracks`: saved track segments, drawn like the one in `path_data`; (x, y, "mop") marks mopping."""

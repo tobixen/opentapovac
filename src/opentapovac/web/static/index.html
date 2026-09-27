@@ -40,6 +40,8 @@
   #log .progress { color: var(--muted); }
   #log .warn { color: var(--warn); } #log .alert, #log .error { color: var(--alert); font-weight: 600; }
   #map { width: 100%; height: auto; border-radius: 6px; background: #fff; }
+  #map { cursor: crosshair; }
+  #maphint { color: var(--muted); font-size: .85rem; margin-top: 6px; }
   #mapopts { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-bottom: 8px; font-size: .9rem; }
   #mapopts input[type=number] { width: 4.5em; font: inherit; }
   /* mapimg.TRACK, TRACK_MOP; movement is also green (heading home) and purple (other) */
@@ -87,6 +89,7 @@
       <label class="move"><input type="checkbox" id="show-move" checked> movement</label>
     </div>
     <img id="map" alt="map with the recent tracks">
+    <div id="maphint">Tap the map to send the robot there (untried from here: watch it).</div>
   </section>
 </main>
 <script src="/static/app.js"></script>

@@ -57,6 +57,10 @@ class DaemonClient:
     async def home(self) -> None:
         await self._call("POST", "/home")
 
+    async def goto(self, point: tuple[int, int] | None = None, room: str | None = None) -> list[int]:
+        body = {"room": room} if room is not None else {"x": point[0], "y": point[1]} if point else {}
+        return (await self._call("POST", "/goto", body))["point"]
+
     async def rooms(self, refresh: bool = False) -> dict[str, Any]:
         return await self._call("POST", "/rooms/refresh") if refresh else await self._call("GET", "/rooms")
 

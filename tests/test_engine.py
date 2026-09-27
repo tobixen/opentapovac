@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from opentapovac import mapimg
 from opentapovac.engine import AnswerError, Busy, Engine, JobRequest, PlanError
 from opentapovac.payloads import STOP
 from opentapovac.robot import RobotError
@@ -674,3 +675,35 @@ async def test_mop_state_read_on_every_poll_while_cleaning(config, events):
     engine, _ = make_engine(config, events, robot)
     await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
     assert len(asked) >= 4
+
+
+async def test_goto_room_with_no_rooms_known_yet(config, events):
+    robot = FakeRobot()
+    engine, _ = make_engine(config, events, robot, rooms=False)
+    x, y = await engine.goto(room="kitchen")
+    assert mapimg.rooms_near(robot.map_data_reply, (x, y), 10) == {1}
+
+
+async def test_failed_map_refresh_keeps_the_map(config, events):
+    robot = FakeRobot()
+    engine, _ = make_engine(config, events, robot)
+    await engine.map_png(refresh=True)
+    robot.fail = {"getMapData": "timeout"}
+    with pytest.raises(RobotError):
+        await engine.map_png(refresh=True)
+    assert (await engine.map_png()).startswith(b"\x89PNG")
+
+
+async def test_goto_point_and_room(config, events):
+    robot = FakeRobot()
+    engine, _ = make_engine(config, events, robot)
+    await engine.goto((300, 200))
+    assert robot.sent == [("gotoPoint", {"switch": True, "point": [300, 200]})]
+    with pytest.raises(PlanError, match="floor"):
+        await engine.goto((4100, 3000))  # off the map
+    x, y = await engine.goto(room="kitchen")
+    assert robot.sent[-1] == ("gotoPoint", {"switch": True, "point": [x, y]})
+    assert mapimg.rooms_near(robot.map_data_reply, (x, y), 10) == {1}
+    with pytest.raises(PlanError):
+        await engine.goto(room="nowhere")
+    assert "goto" in [r["code"] for r in events.recent()]
