@@ -7,6 +7,7 @@ for anything else.  No accounts here.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import math
 from importlib.resources import files
@@ -71,7 +72,8 @@ routes = web.RouteTableDef()
 
 @routes.get("/")
 async def index(request: web.Request) -> web.Response:
-    return web.Response(text=(STATIC / "index.html").read_text(), content_type="text/html")
+    text = (STATIC / "index.html").read_text().replace("{{version}}", html.escape(__version__))
+    return web.Response(text=text, content_type="text/html")
 
 
 @routes.get("/static/{name}")

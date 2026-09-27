@@ -5,6 +5,7 @@ import time
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from opentapovac import __version__
 from opentapovac.client import DaemonClient
 from opentapovac.engine import Engine
 from opentapovac.rooms import RoomTable
@@ -31,7 +32,9 @@ async def test_index(make_client):
     client, _, _ = await make_client()
     r = await client.get("/")
     assert r.status == 200
-    assert "OpenTapoVac" in await r.text()
+    text = await r.text()
+    assert "OpenTapoVac" in text
+    assert f'<span class="version">{__version__}</span>' in text
     assert (await client.get("/static/app.js")).status == 200
     await client.close()
 

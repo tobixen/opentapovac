@@ -16,7 +16,7 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 - A daemon (`opentapovac serve`) with an HTTP API; the other commands use
   it when it answers and run standalone when it doesn't.
 - A web page for day-to-day runs: room and preset buttons, mode, stop,
-  status, event log and map.
+  status, event log, map and the version next to the title.
 - Home rules from the config: room order within a run (`order.first`,
   `order.last`), and carry rooms (`carry_in`, `carry_out`) that get their
   own run and ask a human to carry the robot, with a position check
