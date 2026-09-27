@@ -25,7 +25,7 @@ STOP = {
     "dust_collection": True,
 }
 
-#: `setSwitchCharge`, from the app (`RobotGotoChargeStatus`); not yet sent to a robot
+#: `setSwitchCharge`, from the app (`RobotGotoChargeStatus`); works (2026-09-28)
 HOME = {"switch_charge": True}
 
 

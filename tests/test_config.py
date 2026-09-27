@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from opentapovac.config import Config, load_config, load_credentials
 
 
@@ -58,3 +60,25 @@ def test_durations_and_order():
     assert c.gave_up_after == 300
     assert c.order == {"first": [6]}
     assert Config.from_dict({"human_wait_timeout": "1h"}).human_wait_timeout == 3600
+
+
+def test_home_route():
+    c = Config.from_dict({"waypoints": {"home_route": ["hall", "kjøkken"]}, "rooms": {6: {"home_route": []}}})
+    assert c.home_route == ["hall", "kjøkken"]
+    assert c.rooms[6]["home_route"] == []
+    assert Config().home_route == []
+    assert Config.from_dict({"monitor": {"waypoint_timeout": "3m"}}).waypoint_timeout == 180
+
+
+@pytest.mark.parametrize(
+    "d",
+    [
+        {"waypoints": {"home_route": "hall"}},
+        {"waypoints": ["hall"]},
+        {"rooms": {6: {"home_route": "hall"}}},
+        {"waypoints": {"home_route": [["hall"]]}},
+    ],
+)
+def test_home_route_must_be_a_list_of_rooms(d):
+    with pytest.raises(ValueError, match="home_route|waypoints"):
+        Config.from_dict(d)

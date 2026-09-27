@@ -8,6 +8,7 @@ import pytest
 
 from opentapovac import mapimg
 from opentapovac.engine import AnswerError, Busy, Engine, JobRequest, PlanError
+from opentapovac.monitor import HomeGuide
 from opentapovac.payloads import STOP
 from opentapovac.robot import RobotError
 from opentapovac.rooms import RoomTable
@@ -646,7 +647,7 @@ LOST_DOCK = [16, 1, 4, vac(0, 21), vac(0), 4, 19, 16]
 
 
 async def test_unfinished_run_is_sent_again_when_a_human_says_so(config, events):
-    robot = forgetful([*LOST_DOCK, 16, 1, 4, 16])
+    robot = forgetful([*LOST_DOCK, 16, 1, 4, 16], percent=20)  # lost at 20 %, as at 00:48
     engine, _ = make_engine(config, events, robot)
     job = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac"))
     await until(lambda: job.question is not None)
@@ -660,7 +661,7 @@ async def test_unfinished_run_is_sent_again_when_a_human_says_so(config, events)
 
 
 async def test_unfinished_run_not_sent_again_without_an_answer(config, events):
-    robot = forgetful([*LOST_DOCK, *LOST_DOCK])
+    robot = forgetful([*LOST_DOCK, *LOST_DOCK], percent=20)  # lost at 20 %, as at 00:48
     engine, _ = make_engine(config, events, robot)
     job = await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
     assert len(_sends(robot)) == 1
@@ -749,3 +750,160 @@ async def test_goto_ends_the_job_first(config, events):
     await engine.goto(room="kitchen")
     assert job.state == "stopped"
     assert robot.sent[-1][0] == "gotoPoint"
+
+
+# heading home it loses the dock; the goto is taken (11) and done (0), twice; then home
+LOST_ON_THE_WAY_HOME = [16, 1, 4, vac(0, 21), 11, 0, 11, 0, 4, 19, 16]
+
+
+def _gotos(robot):
+    return [tuple(p["point"]) for m, p in robot.sent if m == "gotoPoint"]
+
+
+async def test_lost_on_the_way_home_is_guided_by_the_home_route(config, events):
+    config.home_route = ["outer hall", "kitchen"]
+    robot = FakeRobot(LOST_ON_THE_WAY_HOME)
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    hall, kitchen = _gotos(robot)
+    assert mapimg.rooms_near(robot.map_data_reply, hall, 10) == {6}
+    assert mapimg.rooms_near(robot.map_data_reply, kitchen, 10) == {1}
+    methods = [m for m, _ in robot.sent]
+    assert methods.index("setSwitchCharge") > methods.index("gotoPoint")
+    assert "guide" in [r["code"] for r in events.recent()]
+
+
+async def test_home_route_overridden_by_the_room_it_is_lost_in(config, events):
+    config.home_route = ["outer hall", "kitchen"]
+    config.rooms[6] = {"aliases": ["outer hall"], "home_route": ["kitchen"]}
+    robot = FakeRobot([16, 1, 4, vac(0, 21), 11, 0, 4, 19, 16])
+    robot.path = (7, [(1, 0), (700, 200)])  # in room 6
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    [kitchen] = _gotos(robot)
+    assert mapimg.rooms_near(robot.map_data_reply, kitchen, 10) == {1}
+
+
+async def test_no_home_route_no_guide(config, events):
+    config.rooms[6] = {"aliases": ["outer hall"], "home_route": []}
+    config.home_route = ["kitchen"]
+    robot = FakeRobot([16, 1, 4, vac(0, 21), 4, 19, 16])
+    robot.path = (7, [(1, 0), (700, 200)])
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert _gotos(robot) == []
+    config.home_route = []
+    robot = FakeRobot([16, 1, 4, vac(0, 21), 4, 19, 16])
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert _gotos(robot) == []
+
+
+async def test_guided_once_per_run(config, events):
+    config.home_route = ["kitchen"]
+    robot = FakeRobot([16, 1, 4, vac(0, 21), 11, 0, 4, vac(0, 21), vac(0, 21), 4, 19, 16])
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert len(_gotos(robot)) == 1
+
+
+async def test_watcher_guides_an_app_run_home(config, events):
+    config.home_route = ["outer hall", "kitchen"]
+    # each look asks twice (the status, then the progress line)
+    robot = FakeRobot([s for s in (4, vac(0, 21), 11, 0, 11, 0, 4, 16) for _ in range(2)])
+    engine, _ = make_engine(config, events, robot)
+    for _ in range(9):
+        await engine.watch_step()
+    assert len(_gotos(robot)) == 2
+    assert robot.sent[-1] == ("setSwitchCharge", {"switch_charge": True})
+
+
+async def test_stop_ends_the_guide(config, events):
+    config.home_route = ["outer hall", "kitchen"]
+    robot = FakeRobot([16, 1, 4, vac(0, 21), 11, 0, 11, 0, 0, 0])
+    engine, _ = make_engine(config, events, robot)
+    await engine.submit(JobRequest(rooms=["outer hall"], mode="vac"))
+    await until(lambda: len(_gotos(robot)) == 1)
+    await engine.stop()
+    for _ in range(6):
+        await engine.watch_step()
+    assert len(_gotos(robot)) == 1
+    assert "setSwitchCharge" not in [m for m, _ in robot.sent]
+
+
+async def test_guide_leaves_remote_control_alone(config, events):
+    config.home_route = ["outer hall", "kitchen"]
+    robot = FakeRobot([16, 1, 4, vac(0, 21), 11, 3, 3, 3, 4, 19, 16])  # a human steers it from the app
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert len(_gotos(robot)) == 1
+    assert "setSwitchCharge" not in [m for m, _ in robot.sent]
+
+
+async def test_no_guide_while_homing_by_itself_or_in_a_carry_run(config, events):
+    config.home_route = ["kitchen"]
+    robot = FakeRobot([16, 1, vac(4, 21), vac(4, 21), 4, 19, 16])  # err 21, but still trying
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert _gotos(robot) == []
+    robot = FakeRobot([16, 1, 1, 4, vac(0, 21), vac(0, 21), vac(0, 21)])
+    engine, _ = make_engine(carry_config(config, carry_out=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac"))
+    await until(lambda: job.question is not None)
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert _gotos(robot) == []
+    await engine.stop()
+
+
+async def test_watcher_guides_again_only_after_the_base(config, events):
+    config.home_route = ["kitchen"]
+    looks = [4, vac(0, 21), 11, 0, 0, vac(0, 21), vac(0, 21), vac(0, 21)]
+    robot = FakeRobot([s for s in looks for _ in range(2)])
+    engine, _ = make_engine(config, events, robot)
+    for _ in range(len(looks)):
+        await engine.watch_step()
+    assert len(_gotos(robot)) == 1
+
+
+async def test_guides_at_most_three_a_day(config, events):
+    config.home_route = ["kitchen"]
+    lost = [4, vac(0, 21), 11, 0, 5]  # guided, then back on the base
+    robot = FakeRobot([s for s in lost * 5 for _ in range(2)])
+    engine, _ = make_engine(config, events, robot)
+    for _ in range(len(lost) * 5):
+        await engine.watch_step()
+    assert len(_gotos(robot)) == 3
+
+
+async def test_forbidden_rooms_left_out_of_the_route(config, events):
+    config.home_route = ["stairs", "kitchen"]
+    robot = FakeRobot(LOST_ON_THE_WAY_HOME)
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    [kitchen] = _gotos(robot)
+    assert mapimg.rooms_near(robot.map_data_reply, kitchen, 10) == {1}
+    assert any("stairs" in r["msg"] for r in events.recent() if r["code"] == "config")
+
+
+async def test_unknown_route_rooms_warned_when_the_rooms_load(config, events):
+    config.home_route = ["bathroom"]
+    make_engine(config, events, FakeRobot())
+    assert any("bathroom" in r["msg"] for r in events.recent() if r["code"] == "config")
+
+
+async def test_no_redo_question_after_a_guided_trip_home_from_a_finished_run(config, events):
+    config.home_route = ["outer hall", "kitchen"]
+    robot = FakeRobot(LOST_ON_THE_WAY_HOME)
+    robot.clean_info_reply = {**robot.clean_info_reply, "clean_percent": 100}
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert job.state == "done"
+    assert "ask" not in [r["code"] for r in events.recent()]
+
+
+def test_watcher_looks_more_often_while_guiding(config, events):
+    engine, _ = make_engine(config, events, FakeRobot())
+    assert engine.watch_delay() == config.watch_interval
+    engine._guide = HomeGuide([("hall", (0, 0))], 180)
+    assert engine.watch_delay() == config.poll_interval

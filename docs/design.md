@@ -176,7 +176,7 @@ HTTP API (the CLI uses it too): `POST /jobs`, `GET /jobs/{id}`,
 `POST /jobs/{id}/answer`, `POST /stop`, `GET /status`, `GET /events`
 (SSE), `GET /map.png?max_age=HOURS&show=vac,mop,move`, `POST /map/refresh`,
 `GET /map.json` (pixel ↔ mm), `POST /goto` (`{x, y}` in map mm or `{room}`;
-gotoPoint, not yet sent from here).
+gotoPoint).
 
 Framework: aiohttp (python-kasa already depends on it) or Starlette.
 Lean: aiohttp, one dependency less.
@@ -220,7 +220,7 @@ rooms:            # keyed by robot room name or id; names come from the robot
 order: {first: ["bedroom 1", 6], last: ["kjøkken"]}
 presets:
   - {label: "Halls + kitchen + bedroom 1", rooms: [5, 6, "kjøkken", "bedroom 1"]}
-waypoints: {home_route: [hall, kjøkken]}     # used only once gotoPoint works
+waypoints: {home_route: [hall, kjøkken]}     # lost on the way home: via these, then home
 # notify: [{type: ntfy, topic: ...}]     # later, see §10
 human_wait_timeout: 15m
 ```
@@ -243,7 +243,7 @@ spec still gate the features that depend on them.
 2. Daemon + HTTP API + CLI-via-daemon.  Messages on the page only.
 3. Web UI, map image.
 4. Home rules: ordering, carry-rooms, position check.
-5. Recovery with waypoints (after `gotoPoint` is verified).
+5. Recovery with waypoints (done: `home_route`, 2026-09-28).
 6. Notifications, deployment (NixOS module / puppet), router WireGuard
    as client.  Host not chosen yet.
 
@@ -282,9 +282,27 @@ Where the build differs from the text above:
   Not with the battery under 30 % or, for mopping, the water tank
   empty.  A skipped vacuum pass is only warned about: the floor is
   mopped by then.
+* **Lost on the way home** (err 21, standing in standby): at once, no
+  `Home()` retry first, the robot goes by `gotoPoint` to a floor spot in
+  each room of the home route, then gets `setSwitchCharge`.  The room it
+  is lost in (the last track point; at a doorway the lowest room id with
+  a route) may name its own, `rooms: {X: {home_route: [...]}}`, `[]` for
+  none.  Forbidden rooms and spots in no-go zones are left out.
+  * A waypoint is reached with the robot within 40 cm of it, or back in
+    standby after going (status 11).  Not reached within
+    `waypoint_timeout` (3 min, counted from the last poll that saw it
+    going): an alert.
+  * Anything else ends the guide: heading home or cleaning by itself,
+    remote control or a pause (a human), lifted, another status; so do
+    Stop, Home and goto.  Not while a question is open or in a carry run.
+  * Once until the robot is seen at the base, and at most 3 times a day.
+    The watcher looks every `poll_interval` while guiding.  Jobs and runs
+    from the app alike.
+  * A run that lost the dock only after reaching 100 % is not
+    "unfinished".
 * **Stop** is the app's stop payload (protocol.md); the robot heads home
-  by itself afterwards.  **Home** (`setSwitchCharge`) is from the app and
-  not yet sent; it ends the current job first (its monitor would take the
+  by itself afterwards.  **Home** (`setSwitchCharge`, from the app, works
+  since 2026-09-28) ends the current job first (its monitor would take the
   trip home for the end of the run and might send the rest again), and
   so does a goto: a human steers the robot then.
 * The web page selects rooms and then starts; the presets start at once.

@@ -88,9 +88,12 @@ rooms:                       # keyed by the robot's room name or id
   stairs: {forbidden: true}  # refused without --force
   "bedroom 2": {carry_in: true}    # can't get in by itself
   "living room": {carry_out: true} # can't get out by itself
+  "boys room": {home_route: [kjøkken]}  # lost here: this route instead
 order: {first: ["bedroom 1", 6], last: ["kjøkken"]}  # within a run
 presets:
   - {label: "Halls + kitchen", rooms: [5, 6, "kjøkken"]}
+waypoints: {home_route: [hall, kjøkken]}  # lost on the way home: via these, then home
+waypoint_timeout: 3m         # a waypoint not reached in this long: an alert
 listen: 127.0.0.1:8765       # the daemon
 human_wait_timeout: 15m      # then an alert; it keeps waiting
 ```

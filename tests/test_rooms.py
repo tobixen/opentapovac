@@ -48,3 +48,10 @@ def test_cache_roundtrip(table, config, tmp_path):
 
 def test_load_missing_cache(config, tmp_path):
     assert len(RoomTable.load(tmp_path / "nope.json", config.rooms)) == 0
+
+
+def test_home_route_per_room(config):
+    rooms = {**config.rooms, 6: {"aliases": ["outer hall"], "home_route": ["kitchen"]}}
+    table = RoomTable.from_map(make_map(), rooms)
+    assert table.resolve("outer hall").home_route == ["kitchen"]
+    assert table.resolve("kitchen").home_route is None  # the default route

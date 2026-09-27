@@ -294,9 +294,12 @@ From the app, not yet sent:
 * `getMopState` → `mop_state`: true while the mop is on (mid-run, mopping).
 * `getAreaInfo`, `getCleanRecordExtraInfo` without params: -1008
   (PARAMS_ERROR).
-* From the app, not yet sent: `gotoPoint {"switch": true, "point": [x, y]}`
-  (`GotoPointParams`), presumably in the mm frame of `getMapData`'s
-  `goto_point` / `real_vac_coor`; status 11 while going.
+* `gotoPoint {"switch": true, "point": [x, y]}` (`GotoPointParams`), in
+  the mm frame of `getMapData`'s `goto_point` / `real_vac_coor`; status
+  11 while going.  Works, also from standby with err 21 (dock not found),
+  from the app and from opentapovac, 2026-09-28.
+* `setSwitchCharge {"switch_charge": true}`: the robot heads home;
+  works, 2026-09-28.
 
 ### Map lock and relocation — verified 2026-09-25
 
@@ -333,10 +336,10 @@ grows until the robot is back on the dock, and the next run starts it
 over).  Short magenta bits (unknown type) show up in some corners.
 `opentapovac render-map … --path PATH.json` draws it.
 
-## Movement — *from app*, not yet sent; the robot moves
+## Movement — *from app*; the robot moves
 
-* `gotoPoint {"switch": true, "point": [x, y]}` — mm, map frame;
-  `switch: false` presumably cancels.
+* `gotoPoint {"switch": true, "point": [x, y]}` — mm, map frame; works
+  (above).  `switch: false` presumably cancels (not sent).
 * `directionControl {"direction": d, "control": bool}`: enter manual mode
   with `d=0, control=true`, leave with `d=4, control=false`; in manual mode
   send `{"direction": d}` per button, 4 = stop (button released).  The app

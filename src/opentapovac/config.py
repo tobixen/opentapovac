@@ -66,6 +66,11 @@ class Config:
     stall_after: float = 300
     #: send a run again, once, when the robot left it unfinished or skipped its mop pass
     redo_missed: bool = True
+    #: lost on its way home (dock not found): go to these rooms in turn, then home;
+    #: `waypoints: {home_route: [...]}` in the file, `rooms: {X: {home_route: [...]}}` per room
+    home_route: list[int | str] = field(default_factory=list)
+    #: a waypoint of the home route not reached within this long: a human is asked
+    waypoint_timeout: float = 180
 
     def __post_init__(self) -> None:
         if self.daemon_url is None:
@@ -111,7 +116,15 @@ class Config:
                 kw[key] = Path(d.pop(key)).expanduser()
         monitor = d.pop("monitor", None) or {}
         kw.update(monitor)
-        # waypoints (milestone 5) and notify (6) are accepted and ignored for now
+        waypoints = d.pop("waypoints", None) or {}
+        if not isinstance(waypoints, dict):
+            raise ValueError("waypoints must be a mapping, like {home_route: [hall, kjøkken]}")
+        if "home_route" in waypoints:
+            kw["home_route"] = _route(waypoints["home_route"], "waypoints.home_route")
+        for key, conf in (d.get("rooms") or {}).items():
+            if isinstance(conf, dict) and conf.get("home_route") is not None:
+                _route(conf["home_route"], f"rooms.{key}.home_route")
+        # notify (milestone 6) is accepted and ignored for now
         kw.update({k: v for k, v in d.items() if k in cls.__dataclass_fields__})
         for key in DURATIONS:
             if key in kw:
@@ -119,8 +132,16 @@ class Config:
         return cls(**kw)
 
 
+def _route(v: Any, where: str) -> list[int | str]:
+    """A list of room names or ids; a single name would otherwise become its letters."""
+    if not isinstance(v, list) or not all(isinstance(r, int | str) and not isinstance(r, bool) for r in v):
+        raise ValueError(f"{where} must be a list of rooms (names or ids), got {v!r}")
+    return list(v)
+
+
 DURATIONS = ("poll_interval", "settle", "start_timeout", "gave_up_after", "idle_timeout")
 DURATIONS += ("human_wait_timeout", "verify_after", "watch_interval", "progress_interval", "stall_after")
+DURATIONS += ("waypoint_timeout",)
 _UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
 
 

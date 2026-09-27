@@ -28,6 +28,8 @@ class Room:
     carry_in: bool = False
     #: the robot can't get out by itself: a human carries it out
     carry_out: bool = False
+    #: lost here on the way home: these rooms in turn, then home; None: the config's `home_route`
+    home_route: list[int | str] | None = None
 
     @property
     def label(self) -> str:
@@ -41,7 +43,9 @@ class RoomTable:
         for rid, name in rooms:
             conf = room_config.get(rid) or room_config.get(str(rid)) or (room_config.get(name) if name else None) or {}
             flags = {k: bool(conf.get(k, False)) for k in ("forbidden", "carry_in", "carry_out")}
-            self._rooms.append(Room(rid, name, list(conf.get("aliases", [])), **flags))
+            route = conf.get("home_route")
+            route = None if route is None else list(route)
+            self._rooms.append(Room(rid, name, list(conf.get("aliases", [])), **flags, home_route=route))
 
     @classmethod
     def from_map(cls, map_data: dict[str, Any], room_config: dict[int | str, dict[str, Any]]) -> RoomTable:

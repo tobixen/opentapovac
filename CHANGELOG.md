@@ -39,6 +39,9 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 - Send the robot to a room or a spot: tap the map on the web page, or
   `opentapovac goto ROOM` / `goto X Y`.  Meant for guiding it home when
   it can't find the dock.  Only floor points outside no-go zones are
-  sent; not yet tried on the robot from here.
-- A "Return to dock" button on the web page, next to Stop; not yet
-  tried on the robot.  Like going to a spot, it ends the current job.
+  sent.
+- A "Return to dock" button on the web page, next to Stop.  Like going
+  to a spot, it ends the current job.
+- Lost on the way home ("dock not found"), the robot is guided room by
+  room along a configured route (`waypoints: {home_route: [...]}`, or
+  per room `home_route`), then sent home.

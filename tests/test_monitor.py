@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from opentapovac.monitor import IdleWatch, Monitor, MonitorParams, Observation
 from tests.conftest import FIXTURES
 
@@ -393,3 +395,72 @@ def test_unfinished_is_missed():
     m = Monitor(sent_at=0, params=P, mop_expected=True)
     feed(m, [obs(20, 1, mop=True), obs(600, 4), obs(840, 0, 21), obs(860, 0), obs(900, 19), obs(1000, 16)])
     assert m.missed == ["unfinished"]
+
+
+def test_home_guide_goes_stop_by_stop_then_home():
+    from opentapovac.monitor import HomeGuide
+
+    g = HomeGuide([("hall", (1000, 0)), ("kitchen", (2000, 0))], timeout=180)
+    assert g.start(0) == [("goto", "hall", (1000, 0))]
+    assert g.step(obs(20, 11), (0, 0)) == []
+    assert g.step(obs(40, 11), (900, 100)) == [("goto", "kitchen", (2000, 0))]  # within reach
+    assert g.step(obs(60, 11), (1500, 0)) == []
+    assert g.step(obs(80, 0), (1700, 0)) == [("home", "", None)]  # it says it is there: 11 ended
+    assert g.done
+    assert g.step(obs(100, 4), (1800, 0)) == []
+
+
+def test_home_guide_gives_up_at_the_timeout():
+    from opentapovac.monitor import HomeGuide
+
+    g = HomeGuide([("hall", (1000, 0))], timeout=180)
+    g.start(0)
+    assert g.step(obs(100, 0, 21), None) == []  # the goto not taken
+    [(what, msg, _)] = g.step(obs(200, 0, 21), None)
+    assert what == "gave_up"
+    assert "hall" in msg
+    assert g.done
+
+
+def test_home_guide_timeout_counts_from_the_last_sign_of_going():
+    from opentapovac.monitor import HomeGuide
+
+    g = HomeGuide([("hall", (1000, 0))], timeout=180)
+    g.start(0)
+    for t in (100, 200, 300):
+        assert g.step(obs(t, 11), None) == []  # a long leg, still going
+    assert g.step(obs(320, 0), None) == [("home", "", None)]
+
+
+def test_home_guide_stops_when_the_robot_finds_its_own_way():
+    from opentapovac.monitor import HomeGuide
+
+    g = HomeGuide([("hall", (1000, 0))], timeout=180)
+    g.start(0)
+    [(what, _, _)] = g.step(obs(20, 4), None)  # heading home by itself (2026-09-25)
+    assert what == "stopped"
+    assert g.done
+    g = HomeGuide([("hall", (1000, 0))], timeout=180)
+    g.start(0)
+    g.step(obs(20, 0, 21), None)  # still standing: the goto not taken yet
+    assert not g.done
+
+
+@pytest.mark.parametrize("o", [obs(40, 3), obs(40, 7), obs(40, 2), obs(40, 0, 4), obs(40, 11, 4), obs(40, 1)])
+def test_home_guide_leaves_a_human_or_the_robot_alone(o):
+    """Remote control in the app, paused by its button, mapping, lifted, cleaning: not "arrived"."""
+    from opentapovac.monitor import HomeGuide
+
+    g = HomeGuide([("hall", (1000, 0)), ("kitchen", (2000, 0))], timeout=180)
+    g.start(0)
+    g.step(obs(20, 11), None)
+    [(what, _, _)] = g.step(o, None)
+    assert what == "stopped"
+    assert g.done
+
+
+def test_lost_dock_after_finishing_is_not_unfinished():
+    m = Monitor(sent_at=0, params=P)
+    feed(m, [obs(20, 1, percent=100), obs(600, 4), obs(840, 0, 21), obs(900, 4), obs(920, 19), obs(1000, 16)])
+    assert m.phase == "done"
+    assert m.missed == []

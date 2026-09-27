@@ -22,7 +22,7 @@ from . import mapimg
 from .codes import error_text, status_text
 from .config import Config
 from .events import EventLog
-from .monitor import CLEANING, Ask, IdleWatch, Monitor, MonitorParams, Observation
+from .monitor import AT_BASE, CLEANING, Ask, HomeGuide, IdleWatch, Monitor, MonitorParams, Observation
 from .payloads import HOME, STOP, goto_payload, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
@@ -32,6 +32,9 @@ from .tracks import KINDS, CleanRecords, Track, describe_record
 __all__ = ["AnswerError", "Busy", "Engine", "Job", "JobRequest", "PlanError"]
 
 _LOGGER = logging.getLogger(__name__)
+
+#: guiding the robot home more often than this in a day: something else is wrong, ask a human
+GUIDES_PER_DAY = 3
 
 #: how far back the map shows tracks, seconds
 MAP_MAX_AGE = 12 * 3600.0
@@ -118,6 +121,12 @@ class Engine:
         )
         #: the map, for naming the room the robot is in; loaded once per job or app run
         self._map: dict[str, Any] | None = None
+        #: guiding the robot home by the home route: once until it is seen at the base, a few times a day
+        self._guide: HomeGuide | None = None
+        self._guided = False
+        self._guide_times: list[float] = []
+        self._route_warned: set[str] = set()
+        self._check_routes()
 
     # --- planning ---
 
@@ -264,6 +273,123 @@ class Engine:
         finally:
             self._unpose(job)
 
+    # --- lost on the way home ---
+
+    def _room_ids_now(self) -> set[int]:
+        """The rooms at the last track point, if there is a track and a map."""
+        if not (self._map and self.track and self.track.segments and self.track.segments[-1]["points"]):
+            return set()
+        try:
+            return mapimg.rooms_near(self._map, self.track.segments[-1]["points"][-1], 100)
+        except Exception:  # noqa: BLE001 — a bad map costs the room name, not the run
+            return set()
+
+    def _floor_spot(self, md: dict[str, Any], r: Room) -> tuple[int, int]:
+        """Where to send the robot in room `r`: a floor spot outside the no-go zones; PlanError if none."""
+        if r.forbidden:
+            raise PlanError(f"{r.label} is forbidden")
+        spot = mapimg.room_spot(md, r.id)
+        if spot is None or not mapimg.is_floor(md, spot):
+            raise PlanError(f"{r.label} has no floor spot outside the no-go zones")
+        return spot
+
+    def _route_from_here(self) -> list[int | str]:
+        """The home route from where the robot is: that room's own `home_route`, else the config's.
+
+        Where it is: the rooms within 10 cm of the last track point; at a
+        doorway the lowest room id with a route of its own wins.
+        """
+        for rid in sorted(self._room_ids_now()):
+            here = next((r for r in self.rooms if r.id == rid), None)
+            if here is not None and here.home_route is not None:
+                return here.home_route
+        return self.config.home_route
+
+    def _check_routes(self) -> None:
+        """Warn about home-route rooms the robot doesn't have, or that are forbidden; once per problem."""
+        if not len(self.rooms):
+            return
+        routes = [("waypoints.home_route", self.config.home_route)]
+        routes += [(f"{r.label}'s home_route", r.home_route) for r in self.rooms if r.home_route]
+        for where, route in routes:
+            for token in route:
+                try:
+                    r = self.rooms.resolve(token)
+                    problem = f"{where}: {r.label} is forbidden" if r.forbidden else None
+                except RoomError as e:
+                    problem = f"{where}: {e}"
+                if problem and problem not in self._route_warned:
+                    self._route_warned.add(problem)
+                    self._emit("warn", problem, "config")
+
+    def _may_guide(self, o: Observation) -> bool:
+        """Lost (err 21) and standing still: not homing by itself (4), not lifted (err 4); once until the base."""
+        return 21 in o.errors and o.status == 0 and 4 not in o.errors and not self._guided
+
+    async def _start_guide(self, o: Observation, job: Job | None) -> None:
+        self._guided = True
+        if self._map is None:
+            await self._load_map()
+        route, stops = self._route_from_here(), []
+        for token in route:
+            try:
+                r = self.rooms.resolve(token)
+                stops.append((r.label, self._floor_spot(self._map, r) if self._map else None))
+            except (RoomError, PlanError) as e:
+                self._emit("warn", f"home_route: {e}", "config", job)
+        stops = [(label, spot) for label, spot in stops if spot is not None]
+        if not stops:
+            if route:
+                self._emit("warn", "lost on the way home, and no waypoint to guide it by (no map?)", "guide", job)
+            return
+        day_ago = self.clock() - 24 * 3600
+        self._guide_times = [t for t in self._guide_times if t > day_ago]
+        if len(self._guide_times) >= GUIDES_PER_DAY:
+            msg = f"lost on the way home again: guided {GUIDES_PER_DAY} times in a day already — needs a human"
+            self._emit("alert", msg, "guide_gave_up", job)
+            return
+        self._guide_times.append(self.clock())
+        via = ", ".join(label for label, _ in stops)
+        self._emit("warn", f"lost on the way home: guiding it via {via}, then home (no need to carry it)", "guide", job)
+        guide = self._guide = HomeGuide(stops, self.config.waypoint_timeout)
+        await self._guide_do(guide, guide.start(o.t), job)
+
+    async def _guide_step(self, o: Observation, job: Job | None) -> None:
+        guide = self._guide
+        if guide is None or guide.done:
+            return
+        pts = self.track.segments[-1]["points"] if self.track and self.track.segments else []
+        await self._guide_do(guide, guide.step(o, tuple(pts[-1]) if pts else None), job)
+
+    async def _guide_do(
+        self, guide: HomeGuide, actions: list[tuple[str, str, tuple[int, int] | None]], job: Job | None
+    ) -> None:
+        for what, text, point in actions:
+            if self._guide is not guide:  # a human took over (stop, home, goto) while we awaited
+                return
+            try:
+                if what == "goto" and point is not None:
+                    self._emit("info", f"guiding it home: to {text} {point}", "guide_goto", job)
+                    await self.robot.send("gotoPoint", goto_payload(*point))
+                elif what == "home":
+                    self._emit("info", "guiding it home: last waypoint reached, sending it home", "guide_home", job)
+                    await self.robot.send("setSwitchCharge", HOME)
+                elif what == "stopped":
+                    self._emit("info", f"guiding it home stopped: {text}", "guide_stopped", job)
+                else:
+                    self._emit("alert", f"guiding it home: {text} — needs a human", "guide_gave_up", job)
+            except RobotError as e:
+                guide.done = True
+                self._emit("alert", f"guiding it home failed: {e} — needs a human", "guide_gave_up", job)
+
+    def watch_delay(self) -> float:
+        """Between the watcher's looks: shorter while guiding the robot home, not to miss a short leg."""
+        return (
+            self.config.poll_interval
+            if self._guide is not None and not self._guide.done
+            else self.config.watch_interval
+        )
+
     # --- what the robot forgets ---
 
     async def _cleaning_with(self, job: Job | None) -> str | None:
@@ -312,7 +438,11 @@ class Engine:
         if self.busy:  # a job started while we asked
             return
         status, errors = vac.get("status"), vac.get("err_status") or []
-        active = status not in (5, 6, 8, 16) and not (status == 0 and not errors)
+        o = Observation.from_replies(self.clock(), vac)
+        guiding = self._guide is not None and not self._guide.done
+        active = guiding or (status not in (5, 6, 8, 16) and not (status == 0 and not errors))
+        if o.status in AT_BASE:
+            self._guided = False
         if active and not self._watching:
             self._watching = True
             await self._fetch_records(None, report=False)
@@ -322,6 +452,9 @@ class Engine:
             await self._load_map()
         if active:
             await self._poll_track(None)
+            await self._guide_step(o, None)
+            if self._may_guide(o):
+                await self._start_guide(o, None)
             with contextlib.suppress(RobotError):
                 self._emit_progress(await self._observe(probe=True), None)
         elif self._watching:
@@ -338,7 +471,7 @@ class Engine:
                 _LOGGER.debug("watch: %s", e)
             except Exception:  # a bug must not end the watcher
                 _LOGGER.exception("watch")
-            await self.sleep(self.config.watch_interval)
+            await self.sleep(self.watch_delay())
 
     # --- humans ---
 
@@ -438,18 +571,12 @@ class Engine:
     async def _load_map(self) -> None:
         try:
             self._map = await self.robot.map_data()
-        except Exception:  # noqa: BLE001 — only used to name rooms in the progress lines
+        except Exception:  # noqa: BLE001 — names rooms in the progress lines, places the home route
             self._map = None
 
     def _room_now(self) -> str | None:
         """The room of the last track point, if there is a track and a map."""
-        if not (self._map and self.track and self.track.segments and self.track.segments[-1]["points"]):
-            return None
-        try:
-            near = mapimg.rooms_near(self._map, self.track.segments[-1]["points"][-1], 100)
-        except Exception:  # noqa: BLE001 — a bad map costs the room name, not the run
-            return None
-        return " / ".join(sorted(self.rooms.label_of(r) for r in near)) or None
+        return " / ".join(sorted(self.rooms.label_of(r) for r in self._room_ids_now())) or None
 
     def _emit_progress(self, o: Observation, job: Job | None) -> None:
         parts = []
@@ -508,6 +635,7 @@ class Engine:
         vacuum_first = run.items[0][1].mode == "vac_then_mop"
         mop_expected = any(s.mode != "vac" for _, s in run.items)
         m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out, vacuum_first, mop_expected)
+        self._guide = None
         probed_at = float("-inf")
         posed: Ask | None = None
         posed_at, told = 0.0, False
@@ -544,8 +672,13 @@ class Engine:
                 if probe:
                     probed_at = o.t
                     self._emit_progress(o, job)
+                await self._guide_step(o, job)
                 for ev in m.step(o):
                     self._emit(ev.level, ev.msg, ev.code, job)
+                if o.status in AT_BASE:
+                    self._guided = False
+                elif self._may_guide(o) and m.ask is None and not (run.carry_in or run.carry_out):
+                    await self._start_guide(o, job)  # not in carry runs: a human is at hand there
                 if m.phase == "done":
                     if m.message:
                         job.message = m.message
@@ -578,7 +711,8 @@ class Engine:
         self._emit("warn", "stop sent", "stop")
 
     async def _end_job(self) -> None:
-        """Cancel the current job, if any; the robot is left as it is."""
+        """Cancel the current job, if any, and the guide home; the robot is left as it is."""
+        self._guide = None
         if self._task is not None and not self._task.done():
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -597,14 +731,14 @@ class Engine:
         except RobotError as e:
             self._emit("alert", f"job ended, but the robot did not take the home command: {e}", "home_failed")
             raise
-        self._emit("info", "sent home (setSwitchCharge, not yet verified on the robot)", "home")
+        self._emit("info", "sent home", "home")
 
     async def goto(self, point: tuple[int, int] | None = None, room: str | None = None) -> tuple[int, int]:
         """Send the robot to a map point (mm), or to a spot in `room`; the point sent.
 
         `gotoPoint` is from the app; the robot followed it when sent from the
-        app while lost on its way home (2026-09-28), but has not yet been sent
-        from here.  Only points on the floor, outside no-go zones, are sent.
+        app while lost on its way home, and from here (2026-09-28).  Only
+        points on the floor, outside no-go zones, are sent.
         """
         md = await self._robot_map()  # also fills the room table on a fresh install
         if room is not None:
@@ -612,10 +746,8 @@ class Engine:
                 r = self.rooms.resolve(room)
             except RoomError as e:
                 raise PlanError(str(e)) from e
-            spot = mapimg.room_spot(md, r.id)
-            if spot is None:
-                raise PlanError(f"{r.label} has no floor on the map")
-            point, where = spot, f"{r.label} {spot}"
+            point = self._floor_spot(md, r)
+            where = f"{r.label} {point}"
         elif point is None:
             raise PlanError("goto needs a point or a room")
         else:
@@ -653,6 +785,7 @@ class Engine:
     def _set_rooms(self, map_data: dict[str, Any]) -> None:
         self.rooms = RoomTable.from_map(map_data, self.config.rooms)
         self.rooms.save(self.config.rooms_cache)
+        self._check_routes()
 
     def recent_tracks(self, max_age: float | None) -> list[Track]:
         """The recorded tracks with points from the last `max_age` seconds (None: all), oldest first."""

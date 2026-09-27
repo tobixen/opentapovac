@@ -10,7 +10,8 @@ spec, both from that log:
   itself ~90 s later once (2026-09-25).  It counts as given up after
   `gave_up_after`.  On 2026-09-26 it was carried to the dock after ~40 s
   and then ended the run there, mid-way: a run that ends after err 21
-  without going out again is reported as maybe unfinished.
+  without going out again is reported as maybe unfinished, unless it had
+  reached 100 % before losing the dock.
 
 What the robot left undone is in `missed` once the run is done:
 "unfinished" (above), or "mop" when a run that should mop was seen
@@ -135,7 +136,11 @@ class IdleWatch:
 ERROR_LEVELS = {
     3: ("alert", "stuck", "stuck — needs a human"),
     4: ("info", "lifted", "lifted (wheels off the floor)"),
-    21: ("alert", "dock_not_found", "dock not found — carry it to the dock unless it tries again by itself"),
+    21: (
+        "alert",
+        "dock_not_found",
+        "dock not found — carry it to the dock, unless it finds its way (by itself or guided)",
+    ),
     26: ("warn", "water_empty", "clean water tank in the base is empty"),
 }
 
@@ -184,6 +189,7 @@ class Monitor:
         # recharge_status reads 1 while it washes the mop at the start of a run
         self._out_armed = False
         self._lost_dock = False  # err 21 since it last went out cleaning
+        self._lost_at: int | None = None  # clean_percent when it lost the dock
         self._seen_errors: set[int] = set()
         self._at_base = True  # carry_in: ask when it next leaves the base; sent from the dock
         self._left_dock = False
@@ -234,6 +240,8 @@ class Monitor:
         self._left_dock |= o.status == CLEANING
         self._seen_errors.update(o.errors)
         if 21 in o.errors:
+            if not self._lost_dock:
+                self._lost_at = self._percent
             self._lost_dock = True
         elif o.status == CLEANING:
             self._lost_dock = False
@@ -260,7 +268,9 @@ class Monitor:
             self.phase = "done"
             at = f" (the robot says {self._percent} % done)" if self._percent is not None else ""
             ev.append(Event("info", "done", f"run finished, robot is back on the dock{at}"))
-            if self._lost_dock:
+            if self._lost_dock and self._lost_at == 100:
+                pass  # lost on the way home from a finished run: nothing left undone
+            elif self._lost_dock:
                 self.missed = ["unfinished"]
                 self.message = "the run ended after the robot lost the dock; it may be unfinished"
                 ev.append(Event("alert", "maybe_unfinished", self.message))
@@ -354,3 +364,62 @@ class Monitor:
     def _fail(self, msg: str) -> list[Event]:
         self.phase, self.message = "failed", msg
         return [Event("error", "failed", msg)]
+
+
+#: `gotoPoint` in progress (app `RobotStatus`; seen while going to a point from the app)
+GOING_TO_POINT = 11
+#: robot position within this of a waypoint (mm): reached
+REACH = 400
+
+
+class HomeGuide:
+    """Lost on the way home: waypoint after waypoint (`gotoPoint`), then home.
+
+    Actions, as (what, label or message, point): ("goto", room, (x, y)),
+    ("home", "", None) once the last waypoint is reached, ("gave_up", msg,
+    None) when one isn't reached in time, ("stopped", why, None) when the
+    guide leaves the robot alone.  A waypoint is reached with the robot
+    within `REACH` of it, or back in standby (0) after going (11).  The
+    time limit counts from the send or the last poll that saw it going.
+    Anything else ends the guide: heading home or cleaning by itself (it
+    found its way once, ~90 s after err 21, 2026-09-25), remote control or
+    a pause (a human), lifted (err 4, a human carrying it), any other
+    status.
+    """
+
+    def __init__(self, stops: list[tuple[str, tuple[int, int]]], timeout: float):
+        self.stops, self.timeout = stops, timeout
+        self.done = False
+        self._i = -1
+        self._since = 0.0  # the send, or the last poll that saw it going
+        self._going = False  # status 11 seen since the last goto
+
+    def start(self, t: float) -> list[tuple[str, str, tuple[int, int] | None]]:
+        return self._next(t)
+
+    def step(self, o: Observation, pos: tuple[float, float] | None) -> list[tuple[str, str, tuple[int, int] | None]]:
+        if self.done:
+            return []
+        if 4 in o.errors or o.status not in (0, GOING_TO_POINT):
+            self.done = True
+            why = "lifted" if 4 in o.errors else status_text(o.status)
+            return [("stopped", f"the robot is {why}", None)]
+        label, point = self.stops[self._i]
+        near = pos is not None and (pos[0] - point[0]) ** 2 + (pos[1] - point[1]) ** 2 <= REACH**2
+        if near or (self._going and o.status == 0):
+            return self._next(o.t)
+        if o.status == GOING_TO_POINT:
+            self._going, self._since = True, o.t
+        elif o.t - self._since >= self.timeout:
+            self.done = True
+            return [("gave_up", f"did not reach {label} within {self.timeout / 60:.0f} min", None)]
+        return []
+
+    def _next(self, t: float) -> list[tuple[str, str, tuple[int, int] | None]]:
+        self._i += 1
+        self._since, self._going = t, False
+        if self._i < len(self.stops):
+            label, point = self.stops[self._i]
+            return [("goto", label, point)]
+        self.done = True
+        return [("home", "", None)]
