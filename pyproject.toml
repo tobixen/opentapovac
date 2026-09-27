@@ -11,11 +11,12 @@ description = "Local control of a TP-Link Tapo robot vacuum: CLI, daemon and web
 readme = "README.md"
 # python-kasa needs 3.11
 requires-python = ">=3.11"
-license = {text = "AGPL-3.0-or-later"}
+# the vendored TPAP transport (src/opentapovac/_tpap.py) is python-kasa's, GPL
+license = "AGPL-3.0-or-later AND GPL-3.0-or-later"
+license-files = ["LICENSE", "LICENSE.python-kasa"]
 authors = [{ name = "Tobias Brox", email = "tobias@redpill-linpro.com" }]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
-  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -23,9 +24,12 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-  # TPAP is not in a python-kasa release yet: the PR branch plus our fix,
-  # see docs/design.md, "Decisions".  A direct reference keeps us off PyPI.
-  "python-kasa @ git+https://github.com/tobixen/python-kasa.git@tpap-rv50-tls-fix",
+  # TPAP is not in a python-kasa release yet: opentapovac/_tpap.py is the
+  # transport from the PR branch, see docs/design.md, "Decisions".
+  # ecdsa and passlib are its dependencies.
+  "python-kasa>=0.10.2",
+  "ecdsa>=0.19.1",
+  "passlib>=1.7.4",
   "aiohttp>=3.9",
   "argcomplete>=3",
   "lz4>=4",
@@ -43,9 +47,6 @@ opentapovac = "opentapovac.cli:main"
 [project.urls]
 Repository = "https://github.com/tobixen/opentapovac"
 Issues = "https://github.com/tobixen/opentapovac/issues"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.version]
 source = "vcs"
@@ -65,6 +66,8 @@ packages = ["src/opentapovac"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+# vendored from python-kasa, kept diffable against it
+extend-exclude = ["src/opentapovac/_tpap.py", "tests/test_tpap.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "PT"]

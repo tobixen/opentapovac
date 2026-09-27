@@ -35,9 +35,10 @@ in [docs/](docs/).
 
 ## Installation
 
-TPAP support is not in a python-kasa release yet, so the package pulls
-python-kasa from a git branch (see docs/design.md, "Decisions") and is not
-on PyPI.
+TPAP support is not in a python-kasa release yet, so the package carries
+its own copy of the TPAP transport from the python-kasa PR branch
+(`src/opentapovac/_tpap.py`, see docs/design.md, "Decisions") and runs it
+on a released python-kasa.
 
 ```
 make install
@@ -49,8 +50,7 @@ Tab completion for bash and zsh comes with it; bash needs the
 
 ### NixOS
 
-`nix/package.nix` builds the package (with python-kasa pinned to the TPAP
-branch) and `nix/module.nix` runs the daemon as `services.opentapovac`:
+`nix/package.nix` builds the package and `nix/module.nix` runs the daemon as `services.opentapovac`:
 
 ```nix
 imports = [ "${opentapovac-src}/nix/module.nix" ];

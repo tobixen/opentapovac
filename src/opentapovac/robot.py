@@ -76,20 +76,26 @@ class Robot:
 
 
 class KasaRobot(Robot):
-    """The real robot, over TPAP/HTTPS with python-kasa (the PR branch, see docs/design.md)."""
+    """The real robot, over TPAP/HTTPS: python-kasa's SmartProtocol on the vendored transport (_tpap.py)."""
 
     def __init__(self, host: str, username: str, password: str, port: int = 4433, timeout: int = 30):
         super().__init__()
         self.host, self.port, self.timeout = host, port, timeout
         self._username, self._password = username, password
-        self._dev: Any = None
+        self._protocol: Any = None
 
     async def _connect(self) -> Any:
-        from kasa import Credentials, Device
+        from kasa import Credentials
         from kasa.deviceconfig import DeviceConfig, DeviceConnectionParameters, DeviceEncryptionType, DeviceFamily
 
-        # what `kasa --port 4433 --https -e tpap -df SMART.TAPOROBOVAC` builds
-        ctype = DeviceConnectionParameters(DeviceFamily("SMART.TAPOROBOVAC"), DeviceEncryptionType("TPAP"), None, True)
+        from ._tpap import TpapSmartProtocol, TpapTransport
+
+        # what `kasa --port 4433 --https -e tpap -df SMART.TAPOROBOVAC` builds,
+        # minus the device detection: only the protocol is used.  Released
+        # python-kasa has no DeviceEncryptionType.Tpap; the transport reads
+        # only the family, https and http_port from the connection type.
+        encryption = getattr(DeviceEncryptionType, "Tpap", DeviceEncryptionType.Aes)
+        ctype = DeviceConnectionParameters(DeviceFamily.SmartTapoRobovac, encryption, None, True)
         config = DeviceConfig(
             host=self.host,
             port_override=self.port,
@@ -97,15 +103,15 @@ class KasaRobot(Robot):
             timeout=self.timeout,
             connection_type=ctype,
         )
-        return await Device.connect(config=config)
+        return TpapSmartProtocol(transport=TpapTransport(config=config))
 
     async def _raw(self, method: str, params: dict[str, Any] | None) -> Any:
         from kasa import KasaException
 
         try:
-            if self._dev is None:
-                self._dev = await self._connect()
-            reply = await self._dev.protocol.query({method: params})
+            if self._protocol is None:
+                self._protocol = await self._connect()
+            reply = await self._protocol.query({method: params})
         except KasaException as e:
             # drop the session; the next query reconnects.  No retry here: a
             # write may have gone through, and sending it twice is worse.
@@ -115,7 +121,7 @@ class KasaRobot(Robot):
             await self.close()
             raise RobotError(f"{method}: {e!r}") from e
         except Exception as e:
-            # a bug in the library (the TPAP branch is unreleased): one line for
+            # a bug in the library (the vendored TPAP transport is unreleased): one line for
             # the user, the traceback with -v
             _LOGGER.debug("%s failed", method, exc_info=True)
             await self.close()
@@ -125,9 +131,9 @@ class KasaRobot(Robot):
         return reply[method]
 
     async def close(self) -> None:
-        dev, self._dev = self._dev, None
-        if dev is not None:
+        protocol, self._protocol = self._protocol, None
+        if protocol is not None:
             try:
-                await dev.disconnect()
+                await protocol.close()
             except Exception:  # noqa: BLE001 — closing a broken session
                 _LOGGER.debug("disconnect failed", exc_info=True)

@@ -34,8 +34,8 @@ cleaned a room yet.
    zone-clean stand-in (never tried).  Resuming an interrupted run needs
    to know what was done (`getPathData`, `getCleanRecords` — unclear).
    v1 must work without them: stop, report, ask a human.
-4. **Reverse-engineered protocol on an unmerged python-kasa branch.**  A
-   firmware update can break everything.  Pin the branch, keep the robot's
+4. **Reverse-engineered protocol from an unmerged python-kasa branch.**  A
+   firmware update can break everything.  Vendor the transport, keep the robot's
    egress closed when not updating, and don't make the family depend on
    it for anything the app can't also do.
 5. **Not on the router.**  Python on OpenWrt is possible (`python3` is in
@@ -318,8 +318,16 @@ Where the build differs from the text above:
   home wifi or WireGuard.  §6 stays as background.
 * **Notifications:** later.  v1 shows messages on the web page (and in
   the CLI) only; `notify.py` waits.
-* **python-kasa:** the local editable install of `<python-kasa checkout>`
-  (`pip install -e`), branch `tpap-rv50-tls-fix`.  State on 2026-09-26:
+* **python-kasa:** a release from PyPI (0.10.2), with the TPAP transport
+  vendored as `src/opentapovac/_tpap.py` (and its tests as
+  `tests/test_tpap.py`), taken from `<python-kasa checkout>`, branch
+  `tpap-rv50-tls-fix` at 6ed51c7.  `KasaRobot` builds python-kasa's
+  `SmartProtocol` on that transport itself, skipping device detection,
+  which needs `DeviceEncryptionType.Tpap`.  Decided 2026-09-27 over
+  publishing a python-kasa fork on PyPI (which would clash with
+  python-kasa on the `kasa` import) and over the git dependency (which
+  PyPI refuses).  Drop `_tpap.py` once a python-kasa release has TPAP.
+  State on 2026-09-26:
   upstream is active (commits weekly, last 2026-09-18) but has not
   released since 0.10.2 (2025-02).  TPAP is ZeliardM's PR
   <https://github.com/python-kasa/python-kasa/pull/1592>: open, mergeable,
