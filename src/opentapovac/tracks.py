@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .codes import error_text
-from .mapimg import track_points
+from .mapimg import TRACK_BREAK, track_points
 from .robot import Robot
 
 #: what the map can show: cleaning by vacuum or mop, and all else (moving between areas, heading home, ...)
@@ -62,6 +62,7 @@ class Track:
 
         A point's line comes from the point before it, which is included even
         when it is not shown.  Kind None: cleaning of unknown kind, shown with "vac" or "mop".
+        The robot's sub-path marker ends a line.
         """
         out: list[list[tuple[int, int, str | None]]] = []
         for s in self.segments:
@@ -72,6 +73,11 @@ class Track:
             for i, (x, y) in enumerate(s["points"]):
                 while m + 1 < len(marks) and marks[m + 1][0] <= i:
                     m += 1
+                if (x, y) == TRACK_BREAK:
+                    if len(line) > 1:
+                        out.append(line)
+                    line, prev = [], None
+                    continue
                 kind = marks[m][2] if point_type(x, y) in CLEANING else "move"
                 pt = (x, y, kind)
                 shown = marks[m][1] >= since and (kind in show if kind else bool({"vac", "mop"} & set(show)))
@@ -80,10 +86,11 @@ class Track:
                         line.append(prev)
                     line.append(pt)
                 elif line:
-                    out.append(line)
+                    if len(line) > 1:
+                        out.append(line)
                     line = []
                 prev = pt
-            if line:
+            if len(line) > 1:
                 out.append(line)
         return out
 

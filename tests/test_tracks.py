@@ -110,3 +110,13 @@ async def test_clean_records(tmp_path):
 def test_describe_record():
     assert describe_record(record(0, 18, 11)) == "18 min, 11 m², 1 mop wash"
     assert describe_record(record(0, 15, 7, error=3, wash_times=2)) == "15 min, 7 m², 2 mop washes, error 3 (stuck)"
+
+
+def test_track_lines_break_at_the_sub_path_marker():
+    """(1, 0) starts a new sub-path, anywhere in the list (2026-09-28: after a resume); no line through it."""
+    pts = [[4129, 3028], [1, 0], [4108, 2960], [8452, 452], [1, 0], [4456, 2512], [4464, 2468]]
+    t = Track(None, [{"path_id": 7, "n": 8, "points": pts, "marks": [[0, 1000, "vac"]]}])
+    assert t.lines() == [
+        [(4108, 2960, "vac"), (8452, 452, "vac")],
+        [(4456, 2512, "vac"), (4464, 2468, "vac")],
+    ]

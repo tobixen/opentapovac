@@ -70,3 +70,9 @@ def test_render_mopping_in_its_own_colour():
     assert (
         render(make_map(), tracks=moving).tobytes() == render(make_map(), tracks=[[(101, 100), (801, 100)]]).tobytes()
     )
+
+
+def test_render_breaks_at_the_sub_path_marker():
+    two = render(make_map(), tracks=[[(100, 100), (800, 100)], [(800, 400), (900, 400)]]).tobytes()
+    marked = [[(100, 100), (800, 100), (1, 0), (800, 400), (900, 400)]]
+    assert render(make_map(), tracks=marked).tobytes() == two

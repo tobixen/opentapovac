@@ -50,6 +50,8 @@ def room_names(map_data: dict[str, Any]) -> dict[int, str]:
 
 #: entries at the start of the robot's list that are not track points; seen: 377,-8 then 1,0, or 1,0 alone
 TRACK_HEADER = {(377, -8), (1, 0)}
+#: starts a sub-path, also mid-list (2026-09-28: after a resume); no line is drawn through it
+TRACK_BREAK = (1, 0)
 
 
 def track_points(path_data: dict[str, Any]) -> list[tuple[int, int]]:
@@ -140,6 +142,8 @@ def render(
         segments.append(track_points(path_data))
     for pts in segments:
         for a, b in zip(pts, pts[1:], strict=False):
+            if TRACK_BREAK in (tuple(a[:2]), tuple(b[:2])):
+                continue
             t = (b[0] % 4 << 2) + b[1] % 4
             col = TRACK_MOP if b[2:] == ("mop",) and t in (0, 5) else TRACK.get(t, TRACK_OTHER)
             dr.line((p(a), p(b)), fill=col, width=2)
