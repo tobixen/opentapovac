@@ -145,6 +145,19 @@ async def test_map_shows_recent_tracks_only(config, events):
     assert await engine.map_png() != both
 
 
+async def test_the_robots_own_track_is_filtered_too(config, events):
+    robot = FakeRobot()
+    engine, _ = make_engine(config, events, robot)
+    bare = await engine.map_png(refresh=True)
+    robot.path = (7, [(0, 0), (100, 100), (800, 100), (802, 300)])
+    everything = await engine.map_png(max_age=None)
+    assert everything != bare
+    # its age is unknown, so only "all" shows it
+    assert await engine.map_png() == bare
+    assert await engine.map_png(max_age=None, show=set()) == bare
+    assert bare != await engine.map_png(max_age=None, show={"move"}) != everything
+
+
 async def test_stop_without_job(config, events):
     robot = FakeRobot()
     engine, _ = make_engine(config, events, robot)

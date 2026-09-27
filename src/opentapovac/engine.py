@@ -563,16 +563,17 @@ class Engine:
         """The map with the tracks recorded in the last `max_age` seconds (None: all), of the kinds in `show`.
 
         The map itself is fetched once and again on `refresh`.  Before the first
-        track is ever recorded, the robot's own track is drawn instead, unfiltered.
+        track is ever recorded, the robot's own track is drawn instead, but only
+        with `max_age` None: its age is unknown.
         """
         if self._map_data is None or refresh:
             self._map_data = await self.robot.map_data()
             self._set_rooms(self._map_data)
         since = time.time() - max_age if max_age else 0
         tracks = [line for t in self.recent_tracks(max_age) for line in t.lines(since, show)]
-        path = None
-        if not any(self.config.tracks_dir.glob("*.json")):
+        if not max_age and not any(self.config.tracks_dir.glob("*.json")):
             with contextlib.suppress(RobotError):
-                path = await self.robot.path_data()
+                own = mapimg.track_points(await self.robot.path_data())
+                tracks = Track(None, [{"points": own}]).lines(0, show)
         names = {r.id: r.label for r in self.rooms}
-        return mapimg.png_bytes(self._map_data, path, names=names, tracks=tracks)
+        return mapimg.png_bytes(self._map_data, names=names, tracks=tracks)
