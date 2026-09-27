@@ -32,3 +32,7 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 - A progress line every minute of a run (percent done, vacuuming or
   mopping, room, battery), and warnings when a vacuum pass is skipped or
   the robot makes no progress for five minutes.
+- When the robot finishes a run without its mop pass, the mopping is
+  sent once more; when it leaves a run unfinished, the web page asks
+  whether to send it again.  Not with the battery low or the water tank
+  empty.  `redo_missed: false` in the config turns this off.

@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import json
 import os
 import time
@@ -489,6 +490,7 @@ async def test_progress_logged_every_minute(config, events):
 
 async def test_progress_logged_by_the_watcher(config, events):
     robot = FakeRobot([1])
+    robot.mop = False
     engine, _ = make_engine(config, events, robot)
     await engine.watch_step()
     assert [r["msg"] for r in events.recent() if r["code"] == "progress"][0].startswith("20 %, 5 min, 3 m², vacuuming")
@@ -516,8 +518,159 @@ async def test_a_corrupt_map_costs_only_the_room_name(config, events):
 async def test_progress_leaves_out_what_the_robot_did_not_say(config, events):
     robot = FakeRobot([1])
     robot.clean_info_reply = {"clean_percent": 20}
+    robot.mop = False
     engine, _ = make_engine(config, events, robot)
     await engine.watch_step()
     line = [r["msg"] for r in events.recent() if r["code"] == "progress"][0]
     assert line.startswith("20 %, vacuuming"), line
     assert "None" not in line
+
+
+def _sends(robot):
+    return [p for m, p in robot.sent if m == "runCleanTask" and p.get("clean_on")]
+
+
+# vacuumed, went home, washed the mop and ended: no mop pass (2026-09-28 00:48)
+NO_MOP = [16, 1, 1, 4, 15, 16]
+
+
+def forgetful(statuses, percent=100):
+    """A robot that doesn't mop, reaches `percent`, and writes a clean record for each run."""
+    robot = FakeRobot(statuses)
+    robot.mop = False
+    robot.clean_info_reply = {**robot.clean_info_reply, "clean_percent": percent}
+    stamps = iter(range(1000, 100000, 1000))
+    robot.next_record = lambda: record(next(stamps))
+    return robot
+
+
+async def test_missed_mop_pass_is_sent_again_as_mop(config, events):
+    robot = forgetful([*NO_MOP, 16, 15, 1, 1, 4, 16])
+    robot.mop = lambda: len(_sends(robot)) > 1  # mops on the second run
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert job.state == "done", job.message
+    first, again = _sends(robot)
+    assert [a["id"] for a in again["area_list"]] == [6]
+    assert again["area_list"][0]["clean_type"] == 1  # mop only, as in test_web's mop job
+    assert first["area_list"][0]["clean_type"] != 1
+    assert "redo" in [r["code"] for r in events.recent()]
+    assert any("again" in r["msg"] for r in events.recent() if r["code"] == "send")
+
+
+async def test_missed_mop_pass_sent_again_only_once(config, events):
+    robot = forgetful([*NO_MOP, *NO_MOP, *NO_MOP])
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert job.state == "done", job.message
+    assert len(_sends(robot)) == 2
+
+
+async def test_redo_missed_off(config, events):
+    config.redo_missed = False
+    robot = forgetful([*NO_MOP, *NO_MOP])
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert len(_sends(robot)) == 1
+    assert "no_mop_pass" in [r["code"] for r in events.recent()]
+
+
+@pytest.mark.parametrize(("attr", "value", "word"), [("clean_water", 1, "water"), ("battery_pct", 25, "battery")])
+async def test_no_redo_with_the_water_tank_empty_or_the_battery_low(config, events, attr, value, word):
+    robot = forgetful([*NO_MOP, *NO_MOP])
+    engine, _ = make_engine(config, events, robot)
+    setattr(robot, attr, value)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert len(_sends(robot)) == 1
+    [rec] = [r for r in events.recent() if r["code"] == "redo_skipped"]
+    assert word in rec["msg"]
+
+
+async def test_no_redo_when_the_robot_does_not_answer_the_checks(config, events):
+    robot = forgetful([*NO_MOP, *NO_MOP])
+    robot.fail = {"getBatteryInfo": "timeout"}
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert len(_sends(robot)) == 1
+    assert "redo_skipped" in [r["code"] for r in events.recent()]
+
+
+async def test_no_redo_when_stopped_by_a_human_mid_pass(config, events):
+    """Stopped from the app during the vacuum pass: it docks at 20 %, which is not the robot forgetting."""
+    robot = forgetful([16, 1, 1, 0, 4, 16, *NO_MOP], percent=20)
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert len(_sends(robot)) == 1
+    assert "no_mop_pass" in [r["code"] for r in events.recent()]
+
+
+async def test_no_redo_without_a_new_clean_record(config, events):
+    """Charging mid-run for longer than `settle` looks done; the robot writes no record then."""
+    robot = forgetful([16, 1, 1, 4, *[5] * 8, *NO_MOP])
+    robot.next_record = None
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert len(_sends(robot)) == 1
+
+
+async def test_no_redo_when_mop_reads_failed_while_cleaning(config, events):
+    robot = forgetful([*NO_MOP, *NO_MOP])
+    reads = iter([False])  # then it fails: a mop pass it may have had
+    robot.mop = lambda: next(reads, None)
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    assert len(_sends(robot)) == 1
+
+
+async def test_only_the_rooms_to_mop_are_mopped_again(config, events):
+    robot = forgetful([*NO_MOP, *NO_MOP])
+    engine, _ = make_engine(config, events, robot)
+    req = JobRequest(rooms=["kitchen", "outer hall"], mode="vac_then_mop")
+    [run] = engine.plan(req)
+    run.items[0] = (run.items[0][0], dataclasses.replace(run.items[0][1], mode="vac"))
+    assert [(r.id, s.mode) for r, s in engine._redo_run(run, ["mop"]).items] == [(run.items[1][0].id, "mop")]
+
+
+LOST_DOCK = [16, 1, 4, vac(0, 21), vac(0), 4, 19, 16]
+
+
+async def test_unfinished_run_is_sent_again_when_a_human_says_so(config, events):
+    robot = forgetful([*LOST_DOCK, 16, 1, 4, 16])
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac"))
+    await until(lambda: job.question is not None)
+    assert job.question.code == "redo"
+    engine.answer(job.id, "again")
+    await engine.wait()
+    assert job.state == "done", job.message
+    first, again = _sends(robot)
+    assert first == again
+    assert job.message == ""  # the second run finished
+
+
+async def test_unfinished_run_not_sent_again_without_an_answer(config, events):
+    robot = forgetful([*LOST_DOCK, *LOST_DOCK])
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert len(_sends(robot)) == 1
+    assert "unfinished" in job.message
+    assert job.question is None
+
+
+async def test_stop_during_the_redo(config, events):
+    robot = forgetful([*NO_MOP, 16, 15, 1])
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac_then_mop"))
+    await until(lambda: len(_sends(robot)) == 2)
+    await engine.stop()
+    assert job.state == "stopped"
+    assert len(_sends(robot)) == 2
+
+
+async def test_mop_state_read_on_every_poll_while_cleaning(config, events):
+    robot = FakeRobot([16, 1, 1, 1, 1, 4, 16])
+    asked = []
+    robot.mop = lambda: asked.append(1) or False
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["outer hall"], mode="vac"))
+    assert len(asked) >= 4

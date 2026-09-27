@@ -352,3 +352,44 @@ def test_end_percentage_reported():
     m = Monitor(sent_at=0, params=P)
     events = feed(m, [obs(20, 1, percent=45), obs(40, 4), obs(60, 16)])
     assert "45 %" in next(e.msg for e in events if e.code == "done")
+
+
+def test_missed_mop_pass():
+    # 2026-09-28 00:48: vacuum then mop, vacuumed, washed the mop at the base and ended there
+    m = Monitor(sent_at=0, params=P, vacuum_first=True, mop_expected=True)
+    events = feed(m, [obs(20, 1, mop=False, percent=100), obs(300, 4), obs(320, 19), obs(340, 15), obs(360, 16)])
+    assert m.phase == "done"
+    assert m.missed == ["mop"]
+    assert [e.level for e in events if e.code == "no_mop_pass"] == ["warn"]
+
+
+def test_no_mop_pass_below_100_percent_is_only_warned():
+    """Stopped by a human mid vacuum pass, most likely: not the robot forgetting."""
+    m = Monitor(sent_at=0, params=P, vacuum_first=True, mop_expected=True)
+    events = feed(m, [obs(20, 1, mop=False, percent=20), obs(300, 4), obs(360, 16)])
+    assert m.missed == []
+    assert "no_mop_pass" in codes(events)
+
+
+def test_no_mop_pass_not_missed_when_mop_reads_failed():
+    m = Monitor(sent_at=0, params=P, vacuum_first=True, mop_expected=True)
+    feed(m, [obs(20, 1, mop=False, percent=100), obs(40, 1), obs(300, 4), obs(360, 16)])
+    assert m.missed == []
+
+
+def test_mop_pass_seen_or_not_known():
+    m = Monitor(sent_at=0, params=P, vacuum_first=True, mop_expected=True)
+    feed(m, [obs(20, 1, mop=False), obs(300, 15), obs(320, 1, mop=True), obs(600, 4), obs(620, 16)])
+    assert m.missed == []
+    m = Monitor(sent_at=0, params=P, mop_expected=True)  # getMopState never answered: can't tell
+    feed(m, [obs(20, 1), obs(300, 4), obs(320, 16)])
+    assert m.missed == []
+    m = Monitor(sent_at=0, params=P)  # a vacuum run
+    feed(m, [obs(20, 1, mop=False), obs(300, 4), obs(320, 16)])
+    assert m.missed == []
+
+
+def test_unfinished_is_missed():
+    m = Monitor(sent_at=0, params=P, mop_expected=True)
+    feed(m, [obs(20, 1, mop=True), obs(600, 4), obs(840, 0, 21), obs(860, 0), obs(900, 19), obs(1000, 16)])
+    assert m.missed == ["unfinished"]

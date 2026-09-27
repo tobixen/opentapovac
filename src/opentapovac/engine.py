@@ -177,11 +177,11 @@ class Engine:
             await self._load_map()
             for i, run in enumerate(job.runs):
                 job.step = i + 1
-                await self._wait_idle(job)
-                await self._send(job, run)
-                await self._follow(job, run)
-                await self._poll_track(job)
-                await self._fetch_records(job)
+                missed, ended = await self._run_once(job, run)
+                redo = self._redo_run(run, missed)
+                if redo is not None and ended and await self._may_redo(job, redo, missed):
+                    job.message = ""
+                    await self._run_once(job, redo, again=True)  # once: what it misses now is only reported
             job.state = "done"
             self._emit("info", f"job {job.id} done", "job_done", job)
         except asyncio.CancelledError:
@@ -199,6 +199,70 @@ class Engine:
             job.finished = datetime.now(UTC).isoformat(timespec="seconds")
             # the robot may still be busy (mop wash, a stuck run): the watcher follows it from here
             self._watching = True
+
+    async def _run_once(self, job: Job, run: Run, again: bool = False) -> tuple[list[str], bool]:
+        """Send a run and follow it to the end.
+
+        What the robot left undone (`Monitor.missed`), and whether its task
+        really ended: a new clean record.  A charge mid-run held longer than
+        `settle` looks like the end to the monitor, but leaves no record.
+        """
+        await self._wait_idle(job)
+        await self._send(job, run, again)
+        missed = await self._follow(job, run)
+        await self._poll_track(job)
+        return missed, bool(await self._fetch_records(job))
+
+    def _redo_run(self, run: Run, missed: list[str]) -> Run | None:
+        """The run again: all of it if unfinished, the rooms to be mopped as mop only if the mop pass was missed."""
+        if not self.config.redo_missed or not missed:
+            return None
+        if "unfinished" in missed:
+            return run
+        items = [(r, dataclasses.replace(s, mode="mop")) for r, s in run.items if s.mode != "vac"]
+        return dataclasses.replace(run, items=items) if items else None
+
+    async def _may_redo(self, job: Job, redo: Run, missed: list[str]) -> bool:
+        """Battery and water allowing; an unfinished run only if a human says so.
+
+        The robot ends a run unfinished when a human carried it to the dock,
+        too (2026-09-26), so that is asked, not assumed.
+        """
+        why = None
+        try:
+            pct = (await self.robot.battery()).get("battery_percentage")
+            if pct is not None and pct < 30:
+                why = f"battery at {pct} %"
+            elif (
+                any(s.mode != "vac" for _, s in redo.items) and (await self.robot.base_status()).get("clean_water") == 1
+            ):
+                why = "the clean water tank in the base is empty"
+        except RobotError as e:
+            why = f"could not read battery/base: {e}"
+        if why:
+            self._emit("alert", f"not sending {redo.describe()} again: {why}", "redo_skipped", job)
+            return False
+        if "unfinished" in missed:
+            q = Ask("redo", f"the run may be unfinished: send {redo.describe()} again?", ["again", "no"])
+            if await self._ask_and_wait(job, q) != "again":
+                return False
+        self._emit("warn", f"the robot left something undone: sending {redo.describe()} again", "redo", job)
+        return True
+
+    async def _ask_and_wait(self, job: Job, q: Ask) -> str | None:
+        """Pose `q` and wait for the answer, at most `human_wait_timeout`; None without one."""
+        self._pose(job, q)
+        deadline = self.clock() + self.config.human_wait_timeout
+        fut = job._answer
+        try:
+            while fut is not None and not fut.done():
+                if self.clock() > deadline:
+                    self._emit("warn", f"nobody answered: {q.text}", "ask_timeout", job)
+                    return None
+                await self.sleep(self.config.poll_interval)
+            return fut.result() if fut is not None else None
+        finally:
+            self._unpose(job)
 
     # --- what the robot forgets ---
 
@@ -229,14 +293,16 @@ class Engine:
                 self._track_failed = True
                 self._emit("warn", f"could not fetch the track: {e}", "track_failed", job)
 
-    async def _fetch_records(self, job: Job | None, report: bool = True) -> None:
+    async def _fetch_records(self, job: Job | None, report: bool = True) -> list[dict[str, Any]]:
+        """The robot's new clean records; it writes one when a task ends."""
         try:
             new = await self.records.fetch(self.robot)
         except Exception as e:  # noqa: BLE001 — as in _poll_track
             _LOGGER.debug("getCleanRecords: %s", e)
-            return
+            return []
         for r in new if report else []:
             self._emit("info", f"robot's record: {describe_record(r)}", "clean_record", job)
+        return new
 
     async def watch_step(self) -> None:
         """One look at the robot outside jobs: record the track of a run from the app, or of a job's tail."""
@@ -341,8 +407,11 @@ class Engine:
             self._emit("warn", f"could not read battery/base: {e}", "preflight", job)
         await self._fetch_records(job, report=False)  # what came before this job
 
-    async def _observe(self, probe: bool = False) -> Observation:
-        """The status; with `probe`, also the mop, the progress and the battery (once a minute)."""
+    async def _observe(self, probe: bool = False, mop_when_cleaning: bool = False) -> Observation:
+        """The status; with `probe`, also the mop, the progress and the battery (once a minute).
+
+        `mop_when_cleaning`: the mop on every poll while cleaning, so a short mop pass isn't missed.
+        """
         vac = await self.robot.vac_status()
         try:
             clean = await self.robot.clean_status()
@@ -350,6 +419,9 @@ class Engine:
             clean = None
         o = Observation.from_replies(self.clock(), vac, clean)
         if not probe:
+            if mop_when_cleaning and o.status == CLEANING:
+                with contextlib.suppress(Exception):
+                    o = dataclasses.replace(o, mop=(await self.robot.mop_state()).get("mop_state"))
             return o
         extra: dict[str, Any] = {}
         # each on its own: a failing one must not cost the others, or the poll
@@ -423,16 +495,19 @@ class Engine:
                 told = True
             await self.sleep(self.config.poll_interval)
 
-    async def _send(self, job: Job, run: Run) -> None:
+    async def _send(self, job: Job, run: Run, again: bool = False) -> None:
         payload = run_payload([(r.id, s) for r, s in run.items])
-        desc = ", ".join(r.label for r in run.rooms)
-        self._emit("info", f"step {job.step}/{len(job.runs)}: sending {desc}", "send", job)
+        desc = run.describe() if again else ", ".join(r.label for r in run.rooms)
+        what = "sending again" if again else "sending"
+        self._emit("info", f"step {job.step}/{len(job.runs)}: {what} {desc}", "send", job)
         await self.robot.send("runCleanTask", payload)
 
-    async def _follow(self, job: Job, run: Run) -> None:
+    async def _follow(self, job: Job, run: Run) -> list[str]:
+        """Follow a run to its end; what the robot left undone (`Monitor.missed`)."""
         room = run.rooms[0]
         vacuum_first = run.items[0][1].mode == "vac_then_mop"
-        m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out, vacuum_first)
+        mop_expected = any(s.mode != "vac" for _, s in run.items)
+        m = Monitor(self.clock(), self.params, room.label, run.carry_in, run.carry_out, vacuum_first, mop_expected)
         probed_at = float("-inf")
         posed: Ask | None = None
         posed_at, told = 0.0, False
@@ -448,11 +523,11 @@ class Engine:
                     if choice == "skip":
                         await self.robot.send("runCleanTask", STOP)
                         self._emit("warn", f"skipped {room.label}: stop sent", "skipped", job)
-                        return
+                        return []
                     m.answer(choice)
                 probe = self.clock() - probed_at >= self.config.progress_interval
                 try:
-                    o = await self._observe(probe)
+                    o = await self._observe(probe, mop_when_cleaning=True)
                 except RobotError as e:
                     # a lost poll is not a lost run; keep watching, but say so when it lasts
                     self._emit("warn", f"poll failed: {e}", "poll_failed", job)
@@ -474,7 +549,7 @@ class Engine:
                 if m.phase == "done":
                     if m.message:
                         job.message = m.message
-                    return
+                    return m.missed
                 if m.phase == "failed":
                     raise JobFailed(m.message)
                 if m.ask is not posed:  # a new question, or the monitor saw the old one done

@@ -93,7 +93,10 @@ class FakeRobot(Robot):
         #: appended to `records` when a run is sent
         self.next_record = None
         self.clean_info_reply = {"clean_time": 5, "clean_area": 3, "clean_percent": 20}
-        self.mop = False
+        #: getMopState, None: no answer (a run's passes unknown); a callable is asked on each call
+        self.mop = None
+        self.battery_pct = 88
+        self.clean_water = 0
 
     async def _raw(self, method, params):
         if method in self.fail:
@@ -103,9 +106,9 @@ class FakeRobot(Robot):
         if method == "getCleanStatus":
             return {"is_relocating": False, "is_mapping": False}
         if method == "getBatteryInfo":
-            return {"battery_percentage": 88}
+            return {"battery_percentage": self.battery_pct}
         if method == "getBaseStatus":
-            return {"clean_water": 0}
+            return {"clean_water": self.clean_water}
         if method == "getMapInfo":
             return self.map_info_reply
         if method == "getMapData":
@@ -118,11 +121,12 @@ class FakeRobot(Robot):
         if method == "getCleanInfo":
             return dict(self.clean_info_reply)
         if method == "getMopState":
-            return {"mop_state": self.mop}
+            return {"mop_state": self.mop() if callable(self.mop) else self.mop}
         if method == "getCleanRecords":
             return {"record_list": list(self.records)}
         if method == "runCleanTask" and params.get("clean_on") and self.next_record:
-            self.records.append(self.next_record)
+            nxt = self.next_record
+            self.records.append(nxt() if callable(nxt) else nxt)
         self.sent.append((method, params))
         return None
 

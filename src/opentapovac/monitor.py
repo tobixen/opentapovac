@@ -12,6 +12,14 @@ spec, both from that log:
   and then ended the run there, mid-way: a run that ends after err 21
   without going out again is reported as maybe unfinished.
 
+What the robot left undone is in `missed` once the run is done:
+"unfinished" (above), or "mop" when a run that should mop was seen
+cleaning, but never with the mop on, although it reached 100 % and every
+mop read while cleaning was answered (2026-09-28: it vacuumed to 100 %,
+washed the mop at the base and ended there).  Below 100 % it was more
+likely stopped by a human (the app, its button), so that is only warned
+about.  The engine may send what was missed again.
+
 Carry rooms (docs/design.md §3) are one room per run, so the monitor knows
 where the robot is without a position: in a `carry_out` run, heading home
 means leaving the room; in a `carry_in` run, leaving the base means heading
@@ -147,13 +155,20 @@ class Monitor:
         carry_in: bool = False,
         carry_out: bool = False,
         vacuum_first: bool = False,
+        mop_expected: bool = False,
     ):
         self.sent_at = sent_at
         self.p = params
         self.room, self.carry_in, self.carry_out = room, carry_in, carry_out
         #: vacuum then mop: the first cleaning should be with the mop off
         self.vacuum_first = vacuum_first
+        #: some room of the run is to be mopped
+        self.mop_expected = mop_expected
+        #: once done: what the robot left undone, "unfinished" or "mop"
+        self.missed: list[str] = []
         self._pass: str | None = None  # vacuum, mop
+        self._mopped = False
+        self._mop_unread = 0  # polls while cleaning without a mop read
         self._percent: int | None = None
         self._percent_since: float | None = None
         self._stall_told = False
@@ -246,8 +261,14 @@ class Monitor:
             at = f" (the robot says {self._percent} % done)" if self._percent is not None else ""
             ev.append(Event("info", "done", f"run finished, robot is back on the dock{at}"))
             if self._lost_dock:
+                self.missed = ["unfinished"]
                 self.message = "the run ended after the robot lost the dock; it may be unfinished"
                 ev.append(Event("alert", "maybe_unfinished", self.message))
+            elif self.mop_expected and self._pass is not None and not self._mopped:
+                if self._percent == 100 and not self._mop_unread:
+                    self.missed = ["mop"]
+                self.message = "the robot ended the run without a mop pass"
+                ev.append(Event("warn", "no_mop_pass", self.message))
         return ev
 
     def _carry(self, o: Observation) -> list[Event]:
@@ -285,8 +306,11 @@ class Monitor:
     def _progress(self, o: Observation) -> list[Event]:
         """Vacuum and mop passes (mop state while cleaning), and a stall in `clean_percent`."""
         ev: list[Event] = []
+        if o.status == CLEANING and o.mop is None and self._pass is not None:
+            self._mop_unread += 1
         if o.status == CLEANING and o.mop is not None:
             p = "mop" if o.mop else "vacuum"
+            self._mopped |= o.mop
             if p != self._pass:
                 if self._pass is None and self.vacuum_first and p == "mop":
                     msg = "vacuum then mop, but it started cleaning with the mop on: the vacuum pass was skipped"

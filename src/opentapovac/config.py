@@ -64,6 +64,8 @@ class Config:
     progress_interval: float = 60
     #: cleaning without progress this long: warn
     stall_after: float = 300
+    #: send a run again, once, when the robot left it unfinished or skipped its mop pass
+    redo_missed: bool = True
 
     def __post_init__(self) -> None:
         if self.daemon_url is None:

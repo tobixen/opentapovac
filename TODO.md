@@ -13,10 +13,9 @@
 * **`pause`/`resume` commands** (`setRobotPause`): accepted, but no effect
   from standby with err 4; still untested on a paused run (status 7),
   which is what the carry flow needs.
-* **A run abandoned after err 21 is only flagged** ("maybe unfinished",
-  2026-09-26 evening).  Which rooms were done is unknown; design.md §4.3
-  wants "queue the rest".  The recorded track and the clean record are
-  the evidence to go on.
+* **A run abandoned after err 21 is sent again as a whole** (design.md).
+  Which rooms were done is unknown; resending only the rest would need
+  the recorded track and the clean record as evidence.
 
 ## From the code review (2026-09-26)
 
@@ -38,10 +37,11 @@
 
 ## Map
 
-* **Is `mop_state` "mopping now" or "mop fitted"?**  The map marks track
-  points as mopping from it, for app runs and vac_then_mop runs.  If it
-  is true for the whole of a vac_then_mop run, the vacuum pass is drawn
-  as mopping.  Read it during the vacuum pass of such a run.
+* **Is `mop_state` "mopping now" or "mop fitted"?**  False all through
+  the vacuum pass of a vac_then_mop run (2026-09-28), but the mop is
+  fitted only after it there, so either reading fits.  Still open for
+  app runs that vacuum with the mop fitted; the map and the missed-mop
+  check both lean on it.
 * **Draw the tracks in the browser.**  Serve the map without tracks (it
   rarely changes) and `/tracks.json` with the lines and the map geometry
   (origin, resolution, height), and draw them on a `<canvas>` over the

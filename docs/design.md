@@ -265,6 +265,21 @@ Where the build differs from the text above:
   run counts as given up only after `gave_up_after` (300 s); a run that
   ends after err 21 without going out again is reported as maybe
   unfinished (alert).
+* **What the robot left undone is sent again, once** (`redo_missed`,
+  on by default), and only once its task really ended (a new clean
+  record: a charge mid-run that looks like the end leaves none):
+  * a missed mop pass, as mop only for the rooms that were to be
+    mopped.  Missed means seen cleaning, never with the mop on, every
+    mop read answered, and 100 % reached (2026-09-28: vacuumed to 100 %,
+    washed the mop, ended).  Below 100 % a human most likely stopped it
+    from the app or its button: only a warning.  `getMopState` is read
+    on every poll while cleaning for this.
+  * an unfinished run (ended after losing the dock) as a whole, which
+    rooms were done being unknown, but only if a human answers "again":
+    being carried to the dock ends a run the same way.
+  Not with the battery under 30 % or, for mopping, the water tank
+  empty.  A skipped vacuum pass is only warned about: the floor is
+  mopped by then.
 * **Stop** is the app's stop payload (protocol.md); the robot heads home
   by itself afterwards.  **Home** (`setSwitchCharge`) is from the app and
   not yet sent; the web page has no button for it.
