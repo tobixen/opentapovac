@@ -25,6 +25,10 @@ STOP = {
     "dust_collection": True,
 }
 
+#: `setRobotPause`, from the app's start/pause button (`RobotPause`)
+PAUSE = {"pause": True}
+RESUME = {"pause": False}
+
 #: `setSwitchCharge`, from the app (`RobotGotoChargeStatus`); works (2026-09-28)
 HOME = {"switch_charge": True}
 

@@ -211,11 +211,12 @@ async def carry_in_job(engine, robot, rooms=("outer hall",)):
 
 
 async def test_carry_in_asks_once_it_leaves_the_base(config, events):
+    config.carry_poll_interval = config.poll_interval  # the position check's timing, at the old pace
     robot = FakeRobot([16, 17, 15, 1], map_data=make_map(real_vac_coor=IN_ROOM_6))
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
     job = await carry_in_job(engine, robot)
-    # sent at once: the mops go on before anyone carries it
-    assert [m for m, _ in robot.sent] == ["runCleanTask"]
+    # sent at once: the mops go on before anyone carries it; paused until carried
+    assert [m for m, _ in robot.sent] == ["runCleanTask", "setRobotPause"]
     assert job.state == "waiting"
     assert "outer hall" in job.question.text
     assert job.to_dict()["question"]["choices"] == ["done", "skip"]
@@ -228,6 +229,7 @@ async def test_carry_in_asks_once_it_leaves_the_base(config, events):
 
 
 async def test_carry_in_seen_lifted_needs_no_answer(config, events):
+    config.carry_poll_interval = config.poll_interval  # the position check's timing, at the old pace
     robot = FakeRobot([16, 1], map_data=make_map(real_vac_coor=IN_ROOM_6))
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
     job = await carry_in_job(engine, robot)
@@ -245,11 +247,10 @@ async def test_carry_in_skip_goes_on_with_the_rest(config, events):
     robot.statuses = [vac(16), vac(1), vac(4), vac(16)]
     await engine.wait()
     assert job.state == "done", job.message
-    assert [(m, p.get("clean_on"), [a["id"] for a in p.get("area_list", [])]) for m, p in robot.sent] == [
-        ("runCleanTask", True, [6]),
-        ("runCleanTask", False, []),
-        ("runCleanTask", True, [1]),
+    runs = [
+        (p.get("clean_on"), [a["id"] for a in p.get("area_list", [])]) for m, p in robot.sent if m == "runCleanTask"
     ]
+    assert runs == [(True, [6]), (False, []), (True, [1])]
     assert "skipped" in [r["code"] for r in events.recent()]
 
 
@@ -265,6 +266,7 @@ async def test_position_wrong_stops_the_robot(config, events):
 
 
 async def test_position_unknown_warns(config, events):
+    config.carry_poll_interval = config.poll_interval  # the position check's timing, at the old pace
     robot = FakeRobot([16, 1])  # real_vac_coor [0, 0, 0], as when docked
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
     job = await carry_in_job(engine, robot)
@@ -432,6 +434,7 @@ async def test_long_loss_of_contact_alerts(config, events):
 
 
 async def test_position_check_failure_is_a_warning(config, events):
+    config.carry_poll_interval = config.poll_interval  # the position check's timing, at the old pace
     robot = Flaky([16, 1])
     engine, _ = make_engine(carry_config(config, carry_in=True), events, robot)
     job = await carry_in_job(engine, robot)
@@ -931,3 +934,70 @@ async def test_position_found_after_a_relocation(config, events):
     assert rec["msg"].startswith("position found: in outer hall")
     codes = [r["code"] for r in events.recent()]
     assert codes.index("relocated") < codes.index("position")
+
+
+PAUSE, RESUME = ("setRobotPause", {"pause": True}), ("setRobotPause", {"pause": False})
+
+
+async def test_paused_for_carrying_out_and_resumed_on_the_answer(config, events):
+    robot = FakeRobot([16, 1, 1, 4, 7])
+    engine, _ = make_engine(carry_config(config, carry_out=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    await until(lambda: PAUSE in robot.sent)
+    assert RESUME not in robot.sent
+    engine.answer(job.id, "done")
+    await until(lambda: RESUME in robot.sent)
+    robot.statuses = [vac(4), vac(16)]
+    await engine.wait()
+    assert job.state == "done", job.message
+
+
+async def test_resumed_when_seen_carried(config, events):
+    """Lifted and put down: the monitor takes that for the answer; the robot is resumed too."""
+    robot = FakeRobot([16, 1, 1, 4, 7, vac(7, 4), vac(7, 4), 7, 4, 16])
+    engine, _ = make_engine(carry_config(config, carry_out=True), events, robot)
+    job = await engine.run(JobRequest(rooms=["outer hall"]))
+    assert job.state == "done", job.message
+    assert robot.sent.index(PAUSE) < robot.sent.index(RESUME)
+
+
+async def test_resume_without_effect_alerts(config, events):
+    robot = FakeRobot([16, 1, 1, 4, 7])
+    engine, _ = make_engine(carry_config(config, carry_out=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    engine.answer(job.id, "done")
+    await until(lambda: "resume_failed" in [r["code"] for r in events.recent()])  # it stays paused
+    await engine.stop()
+
+
+async def test_no_pause_when_switched_off(config, events):
+    config.pause_for_carry = False
+    robot = FakeRobot([16, 1, 1, 4])
+    engine, _ = make_engine(carry_config(config, carry_out=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    engine.answer(job.id, "done")
+    robot.statuses = [vac(16)]
+    await engine.wait()
+    assert PAUSE not in robot.sent
+
+
+async def test_carry_runs_poll_faster(config, events):
+    robot = FakeRobot([16, 1, 1, 4])
+    engine, clock = make_engine(carry_config(config, carry_out=True), events, robot)
+    job = await engine.submit(JobRequest(rooms=["outer hall"]))
+    await until(lambda: job.question is not None)
+    t = clock.t
+    await until(lambda: clock.t > t)
+    assert clock.t - t == config.carry_poll_interval
+    await engine.stop()
+
+
+async def test_pause_and_resume_commands(config, events):
+    robot = FakeRobot()
+    engine, _ = make_engine(config, events, robot)
+    await engine.pause()
+    await engine.resume()
+    assert robot.sent == [PAUSE, RESUME]

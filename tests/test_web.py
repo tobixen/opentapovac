@@ -93,6 +93,14 @@ async def test_home(make_client):
     await client.close()
 
 
+async def test_pause_and_resume(make_client):
+    client, _, robot = await make_client()
+    assert (await client.post("/pause", json={})).status == 200
+    assert (await client.post("/resume", json={})).status == 200
+    assert robot.sent[-2:] == [("setRobotPause", {"pause": True}), ("setRobotPause", {"pause": False})]
+    await client.close()
+
+
 async def test_goto(make_client):
     client, _, robot = await make_client()
     assert (await client.post("/goto", json={"x": 300, "y": 200})).status == 200

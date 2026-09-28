@@ -41,6 +41,9 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   `opentapovac goto ROOM` / `goto X Y`.  Meant for guiding it home when
   it can't find the dock.  Only floor points outside no-go zones are
   sent.
+- When the robot needs carrying, it is paused until it has been carried,
+  then resumed, so it doesn't give up the run at the doorstep
+  (`pause_for_carry: false` turns it off); `opentapovac pause`/`resume`.
 - A "Return to dock" button on the web page, next to Stop.  Like going
   to a spot, it ends the current job.
 - Lost on the way home ("dock not found"), the robot is guided room by

@@ -10,9 +10,9 @@
 * **The idle check refuses standby with err 4**, so a new run can't be
   sent after a carry until the error is cleared by the button.  Consider a
   `--no-idle-wait` option for when a human is next to the robot.
-* **`pause`/`resume` commands** (`setRobotPause`): accepted, but no effect
-  from standby with err 4; still untested on a paused run (status 7),
-  which is what the carry flow needs.
+* **Pause for a carry, resume after it** is built (design.md) but
+  untried: whether `setRobotPause {"pause": false}` resumes a robot that
+  was paused, lifted and put down, or err 4 needs the button again.
 * **A run abandoned after err 21 is sent again as a whole** (design.md).
   Which rooms were done is unknown; resending only the rest would need
   the recorded track and the clean record as evidence.

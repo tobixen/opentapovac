@@ -26,9 +26,10 @@ where the robot is without a position: in a `carry_out` run, heading home
 means leaving the room; in a `carry_in` run, leaving the base means heading
 for the room (the run is sent from the dock, so the mops are on before
 anyone carries it).  Either way it raises a question (`ask`) for a human.
-The robot is not paused meanwhile (`setRobotPause` is untried): it stops at
-the doorstep by itself.  The question is answered by `answer()`, or by the
-robot being seen lifted (err 4) and put down again.  While a question is
+The engine pauses the robot meanwhile (`pause_for_carry`): unpaused it
+gives up at the doorstep fast and forgets where it has been.  The question
+is answered by `answer()`, or by the robot being seen lifted (err 4) and
+put down again; the engine then resumes it.  While a question is
 open, standby doesn't count as giving up.  After a carry-in, `verify_due`
 says when the position is worth checking.
 """

@@ -64,6 +64,10 @@ class Config:
     progress_interval: float = 60
     #: cleaning without progress this long: warn
     stall_after: float = 300
+    #: pause the robot while a human is asked to carry it (and resume it once carried)
+    pause_for_carry: bool = True
+    #: seconds between polls in a carry run: the robot gives up at the doorstep fast
+    carry_poll_interval: float = 5
     #: send a run again, once, when the robot left it unfinished or skipped its mop pass
     redo_missed: bool = True
     #: lost on its way home (dock not found): go to these rooms in turn, then home;
@@ -141,7 +145,7 @@ def _route(v: Any, where: str) -> list[int | str]:
 
 DURATIONS = ("poll_interval", "settle", "start_timeout", "gave_up_after", "idle_timeout")
 DURATIONS += ("human_wait_timeout", "verify_after", "watch_interval", "progress_interval", "stall_after")
-DURATIONS += ("waypoint_timeout",)
+DURATIONS += ("waypoint_timeout", "carry_poll_interval")
 _UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
 
 

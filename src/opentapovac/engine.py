@@ -23,7 +23,7 @@ from .codes import error_text, status_text
 from .config import Config
 from .events import EventLog
 from .monitor import AT_BASE, CLEANING, Ask, HomeGuide, IdleWatch, Monitor, MonitorParams, Observation
-from .payloads import HOME, STOP, goto_payload, run_payload
+from .payloads import HOME, PAUSE, RESUME, STOP, goto_payload, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
 from .rooms import Room, RoomError, RoomTable
@@ -32,6 +32,9 @@ from .tracks import KINDS, CleanRecords, Track, describe_record
 __all__ = ["AnswerError", "Busy", "Engine", "Job", "JobRequest", "PlanError"]
 
 _LOGGER = logging.getLogger(__name__)
+
+#: resumed after a carry, but still paused or in standby this long: the resume didn't take
+RESUME_CHECK = 60
 
 #: guiding the robot home more often than this in a day: something else is wrong, ask a human
 GUIDES_PER_DAY = 3
@@ -499,6 +502,26 @@ class Engine:
         self._emit("info", f"answered: {choice}", "answered", job)
         fut.set_result(choice)
 
+    async def _carry_pause(self, job: Job) -> bool:
+        """Pause for a carry, so the run isn't given up at the doorstep; True if the robot took the command."""
+        try:
+            await self.robot.send("setRobotPause", PAUSE)
+        except RobotError as e:
+            self._emit("warn", f"could not pause it for the carry: {e}", "pause_failed", job)
+            return False
+        self._emit("info", "paused until it is carried", "pause", job)
+        return True
+
+    async def _carry_resume(self, job: Job) -> float | None:
+        """Resume after a carry; the time, to check that it goes on."""
+        try:
+            await self.robot.send("setRobotPause", RESUME)
+        except RobotError as e:
+            self._emit("alert", f"could not resume it after the carry: {e} — press its button", "resume_failed", job)
+            return None
+        self._emit("info", "carried: resumed", "resume", job)
+        return self.clock()
+
     async def _verify_position(self, job: Job, room: Room) -> None:
         """After a carry-in: is the robot where it was put?  Wrong = stop, before it cleans by a wrong map."""
         try:
@@ -650,9 +673,13 @@ class Engine:
         lost_since: float | None = None
         lost_told = False
         relocated = False
+        carry = run.carry_in or run.carry_out
+        paused = False  # by us, for a carry
+        resumed_at: float | None = None  # and resumed: it should go on
+        interval = self.config.carry_poll_interval if carry else self.config.poll_interval
         try:
             while True:
-                await self.sleep(self.config.poll_interval)
+                await self.sleep(interval)
                 if posed is not None and job._answer is not None and job._answer.done():
                     choice = job._answer.result()
                     self._unpose(job)
@@ -662,6 +689,8 @@ class Engine:
                         self._emit("warn", f"skipped {room.label}: stop sent", "skipped", job)
                         return []
                     m.answer(choice)
+                    if paused:
+                        paused, resumed_at = False, await self._carry_resume(job)
                 probe = self.clock() - probed_at >= self.config.progress_interval
                 try:
                     o = await self._observe(probe, mop_when_cleaning=True)
@@ -701,9 +730,13 @@ class Engine:
                 if m.ask is not posed:  # a new question, or the monitor saw the old one done
                     if posed is not None:
                         self._unpose(job)
+                        if paused and m.ask is None:  # seen carried: lifted and put down
+                            paused, resumed_at = False, await self._carry_resume(job)
                     if m.ask is not None:
                         self._pose(job, m.ask)
                         posed_at, told = self.clock(), False
+                        if self.config.pause_for_carry and not paused:
+                            paused = await self._carry_pause(job)
                     posed = m.ask
                 elif posed is not None and not told and self.clock() - posed_at > self.config.human_wait_timeout:
                     told = True
@@ -711,6 +744,13 @@ class Engine:
                 if m.verify_due:
                     m.verify_due = False
                     await self._verify_position(job, room)
+                if resumed_at is not None:
+                    if o.status not in (0, 7):
+                        resumed_at = None
+                    elif self.clock() - resumed_at >= RESUME_CHECK:
+                        resumed_at = None
+                        msg = "resumed after the carry, but it doesn't go on — press its button"
+                        self._emit("alert", msg, "resume_failed", job)
         finally:
             if posed is not None:
                 self._unpose(job)
@@ -745,6 +785,15 @@ class Engine:
             self._emit("alert", f"job ended, but the robot did not take the home command: {e}", "home_failed")
             raise
         self._emit("info", "sent home", "home")
+
+    async def pause(self) -> None:
+        """Pause the robot's run (`setRobotPause`); the job, if any, goes on watching."""
+        await self.robot.send("setRobotPause", PAUSE)
+        self._emit("info", "paused", "pause")
+
+    async def resume(self) -> None:
+        await self.robot.send("setRobotPause", RESUME)
+        self._emit("info", "resumed", "resume")
 
     async def goto(self, point: tuple[int, int] | None = None, room: str | None = None) -> tuple[int, int]:
         """Send the robot to a map point (mm), or to a spot in `room`; the point sent.

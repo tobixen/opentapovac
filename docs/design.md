@@ -173,7 +173,8 @@ One page, phones first.
   (htmx or hand-written), no build step.
 
 HTTP API (the CLI uses it too): `POST /jobs`, `GET /jobs/{id}`,
-`POST /jobs/{id}/answer`, `POST /stop`, `GET /status`, `GET /events`
+`POST /jobs/{id}/answer`, `POST /stop`, `POST /pause`, `POST /resume`,
+`GET /status`, `GET /events`
 (SSE), `GET /map.png?max_age=HOURS&show=vac,mop,move`, `POST /map/refresh`,
 `GET /map.json` (pixel ↔ mm), `POST /goto` (`{x, y}` in map mm or `{room}`;
 gotoPoint).
@@ -309,9 +310,16 @@ Where the build differs from the text above:
 * **Carry rooms go first**: each gets a run of its own, before the
   multi-room run, since whoever pressed the button is most likely still
   around.
-* **No pause**: `setRobotPause` is untried, so nothing is paused, and the
-  engine keeps watching the robot while a question is open (standby then
-  doesn't count as giving up).  A carry-in run is sent from the dock like
+* **Paused for a carry** (`pause_for_carry`, on by default): unpaused,
+  the robot gives up the run quickly at a high doorstep and forgets
+  where it has cleaned.  So when a carry question goes up the engine
+  sends `setRobotPause`, and resumes the robot once the question is
+  answered or it is seen lifted and put down.  If it is still paused or
+  in standby a minute after the resume, an alert says to press its
+  button (resume from standby with err 4 did nothing on 2026-09-26).
+  Carry runs are polled every `carry_poll_interval` (5 s), to pause it
+  before it gives up.  The engine keeps watching the robot while a
+  question is open (standby then doesn't count as giving up).  A carry-in run is sent from the dock like
   any other, so the mops go on first; the question comes when the robot
   leaves the base, and again each time it leaves it mid-run (after a mop
   wash, say).  The robot stops at the doorstep by itself (2026-09-25).  A

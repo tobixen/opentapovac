@@ -168,6 +168,18 @@ async def home(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+@routes.post("/pause")
+async def pause(request: web.Request) -> web.Response:
+    await request.app[ENGINE].pause()
+    return web.json_response({"ok": True})
+
+
+@routes.post("/resume")
+async def resume(request: web.Request) -> web.Response:
+    await request.app[ENGINE].resume()
+    return web.json_response({"ok": True})
+
+
 @routes.post("/goto")
 async def goto(request: web.Request) -> web.Response:
     """`{"x": mm, "y": mm}` in the map's frame, or `{"room": name}`: send the robot there."""
