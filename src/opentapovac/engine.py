@@ -409,15 +409,17 @@ class Engine:
         except Exception:  # noqa: BLE001 — as in _poll_track
             return None
 
-    async def _poll_track(self, job: Job | None) -> None:
+    async def _poll_track(self, job: Job | None) -> int:
+        """Fetch the new track points; how many (0 on failure)."""
         if self.track is None:
-            return
+            return 0
         try:
-            await self.track.poll(self.robot, lambda: self._cleaning_with(job))
+            return await self.track.poll(self.robot, lambda: self._cleaning_with(job))
         except Exception as e:  # noqa: BLE001 — bookkeeping on a reverse-engineered reply must not end a job
             if not self._track_failed:  # once per track
                 self._track_failed = True
                 self._emit("warn", f"could not fetch the track: {e}", "track_failed", job)
+            return 0
 
     async def _fetch_records(self, job: Job | None, report: bool = True) -> list[dict[str, Any]]:
         """The robot's new clean records; it writes one when a task ends."""
@@ -578,6 +580,12 @@ class Engine:
         """The room of the last track point, if there is a track and a map."""
         return " / ".join(sorted(self.rooms.label_of(r) for r in self._room_ids_now())) or None
 
+    def _emit_position(self, job: Job | None) -> None:
+        """Where the robot is after a relocation: the room and the point of its newest track point."""
+        x, y = self.track.segments[-1]["points"][-1] if self.track and self.track.segments else ("?", "?")
+        room = self._room_now() or "no known room"
+        self._emit("info", f"position found: in {room} ({x}, {y}) — check that it is right", "position", job)
+
     def _emit_progress(self, o: Observation, job: Job | None) -> None:
         parts = []
         if o.percent is not None:
@@ -641,6 +649,7 @@ class Engine:
         posed_at, told = 0.0, False
         lost_since: float | None = None
         lost_told = False
+        relocated = False
         try:
             while True:
                 await self.sleep(self.config.poll_interval)
@@ -668,13 +677,17 @@ class Engine:
                 if lost_told:
                     self._emit("info", "contact with the robot is back", "contact", job)
                 lost_since, lost_told = None, False
-                await self._poll_track(job)  # first: the progress line names the room from it
+                moved = await self._poll_track(job)  # first: the progress line names the room from it
+                if relocated and moved:
+                    relocated = False
+                    self._emit_position(job)
                 if probe:
                     probed_at = o.t
                     self._emit_progress(o, job)
                 await self._guide_step(o, job)
                 for ev in m.step(o):
                     self._emit(ev.level, ev.msg, ev.code, job)
+                    relocated |= ev.code == "relocated"  # say where, once it moves on from there
                 if o.status in AT_BASE:
                     self._guided = False
                 elif self._may_guide(o) and m.ask is None and not (run.carry_in or run.carry_out):

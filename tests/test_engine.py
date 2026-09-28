@@ -907,3 +907,27 @@ def test_watcher_looks_more_often_while_guiding(config, events):
     assert engine.watch_delay() == config.watch_interval
     engine._guide = HomeGuide([("hall", (0, 0))], 180)
     assert engine.watch_delay() == config.poll_interval
+
+
+async def test_position_found_after_a_relocation(config, events):
+    robot = FakeRobot([16, 1, 1, 1, 1, 4, 16])
+    looks = iter(range(1000))
+    robot.relocating = lambda: 2 <= next(looks) < 4  # the 2nd and 3rd poll of the run
+    moved = []
+    robot.path = lambda: (7, [(1, 0), (200, 200), *moved])
+    engine, _ = make_engine(config, events, robot)
+
+    def relocated():
+        codes = [r["code"] for r in events.recent()]
+        if "relocated" in codes and not moved:
+            moved.append((700, 200))  # it moves on, in room 6
+        return codes
+
+    job = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac"))
+    await until(lambda: "relocated" in relocated())
+    await engine.wait()
+    assert job.state == "done", job.message
+    [rec] = [r for r in events.recent() if r["code"] == "position"]
+    assert rec["msg"].startswith("position found: in outer hall")
+    codes = [r["code"] for r in events.recent()]
+    assert codes.index("relocated") < codes.index("position")

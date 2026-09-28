@@ -95,6 +95,8 @@ class FakeRobot(Robot):
         self.clean_info_reply = {"clean_time": 5, "clean_area": 3, "clean_percent": 20}
         #: getMopState, None: no answer (a run's passes unknown); a callable is asked on each call
         self.mop = None
+        #: getCleanStatus.is_relocating; a callable is asked on each call
+        self.relocating = False
         self.battery_pct = 88
         self.clean_water = 0
 
@@ -104,7 +106,8 @@ class FakeRobot(Robot):
         if method == "getVacStatus":
             return self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
         if method == "getCleanStatus":
-            return {"is_relocating": False, "is_mapping": False}
+            reloc = self.relocating() if callable(self.relocating) else self.relocating
+            return {"is_relocating": reloc, "is_mapping": False}
         if method == "getBatteryInfo":
             return {"battery_percentage": self.battery_pct}
         if method == "getBaseStatus":
@@ -117,7 +120,8 @@ class FakeRobot(Robot):
             if self.path is None:
                 raise RobotError("no path")
             self.path_calls.append(params["start_pos"])
-            return path_reply(*self.path, params["start_pos"])
+            path = self.path() if callable(self.path) else self.path
+            return path_reply(*path, params["start_pos"])
         if method == "getCleanInfo":
             return dict(self.clean_info_reply)
         if method == "getMopState":
