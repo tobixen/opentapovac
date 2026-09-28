@@ -1,6 +1,6 @@
 # Contributing to OpenTapoVac
 
-Contributions are mostly welcome (but do inform about it if you've used AI or other tools).  If the length of this text scares you, then I'd rather want you to skip reading and just produce a pull-request in GitHub.  If you find it too difficult to write test code, etc, then you may skip it and hope the maintainer will fix it.
+Contributions are mostly welcome (but do tell if you've used AI or other tools).  If the length of this text scares you, then I'd rather you skip reading and just make a pull request on GitHub.  If you find it too difficult to write test code, etc., then you may skip it and hope the maintainer will fix it.
 
 ## What to include
 

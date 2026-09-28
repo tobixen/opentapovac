@@ -1,6 +1,6 @@
 # OpenTapoVac
 
-Disclaimer: parts of this file is AI-generated (Claude Opus 5.5), but all of it has been reviewed by a human.
+Disclaimer: parts of this file are AI-generated (Claude Opus 5.5), but all of it has been reviewed by a human.
 
 Local control of a TP-Link Tapo robot vacuum (developed against the
 RV50 Pro Omni): a daemon, a command-line tool and a small web page for
@@ -9,16 +9,16 @@ day-to-day cleaning, with house-specific rules kept in a config file.
 ## Background
 
 I was not doing my research properly, and ended up with the RV50 Pro
-Omni robot vacuum.  I learned some few things about this device:
+Omni robot vacuum.  I learned a few things about this device:
 
 * The robot itself is quite decent.
-* The software does not work out very well in my home.  The firmware seems to be quite buggy, it's frequently doing weird things, particularly it has the tendency to not find the way back to the dock - sometimes searching the whole house without success even if the dock is very visible on the map.  It's also aborting the whole run (i.e. "wash and then mop all the rooms") mid-way without any way to resume if anyhting goes wrong.  It frequently needs to look around to "find my position", and it's not reliably finding the position.
-* The firmware is locked down - not possible to fix it, hack it, nor replace it with Valetudo - we're stuck with the vendor-provided firmware.  Hence, the "Open"-part of this project is limited to the client-side software, this is not open firmware.
+* The software does not work out very well in my home.  The firmware seems to be quite buggy; it's frequently doing weird things, particularly it has the tendency to not find the way back to the dock - sometimes searching the whole house without success even if the dock is very visible on the map.  It's also aborting the whole run (e.g. "wash and then mop all the rooms") midway without any way to resume if anything goes wrong.  It frequently needs to look around to "find my position", and it's not reliably finding the position.
+* The firmware is locked down - not possible to fix it, hack it, nor replace it with Valetudo - we're stuck with the vendor-provided firmware.  Hence, the "Open" part of this project is limited to the client-side software; this is not open firmware.
 * The robot has problems with doorsteps.
-* It is possible to reverse-engineer the cellphone app, and it is possible to control the device from the local network.  (see also [python-kasa PR #1592](https://github.com/python-kasa/python-kasa/pull/1592)).
+* It is possible to reverse-engineer the cellphone app, and it is possible to control the device from the local network (see also [python-kasa PR #1592](https://github.com/python-kasa/python-kasa/pull/1592)).
 * Apparently, if only using the robot in the late nights and early mornings, it will never empty the dust container - and it seems that the water container in the robot won't be refilled.  Its clock was an hour off (UTC+1 while Oslo was on summer time), which pushed the quiet hours into the morning - whether it doesn't handle DST or just lost the update when its internet access was closed is not known.
 
-This project has some few goals:
+This project has a few goals:
 
 * Make workarounds for many of the issues found in the software
 * Make a CLI for me
@@ -27,7 +27,7 @@ This project has some few goals:
 
 ## Status
 
-"It seems to work" with my 'bot and my home.  It has a daemon, a command-line tool and a web-page.  There are still some planned features that are missing.  In the start I had the idea that it was no point trying to replace the app - just make an interface suitable for daily routines and for working around all the problems encountered.  However, the app stopped working the moment I closed the egress for the vacuum, and I do find it a lot easier to do things from the laptop than from a cellphone app - so the long-term design goal now is to make the cellphone app completely obsolete.
+"It seems to work" with my 'bot and my home.  It has a daemon, a command-line tool and a web page.  There are still some planned features that are missing.  At the start I had the idea that there was no point trying to replace the app - just make an interface suitable for daily routines and for working around all the problems encountered.  However, the app stopped working the moment I closed the egress for the vacuum, and I do find it a lot easier to do things from the laptop than from a cellphone app - so the long-term design goal now is to make the cellphone app completely obsolete.
 
 ## Installation
 
@@ -180,7 +180,7 @@ that check.
 
 ## Are you using this?  Please say so
 
-The maintainers interest for this project will likely die the day the robot breaks down.  If you use OpenTapoVac, or would like to, please open an issue or a discussion and say which robot you have.  Knowing there are other users matters, and at some point someone else may need to take over as maintainer.
+The maintainer's interest in this project will likely die the day the robot breaks down.  If you use OpenTapoVac, or would like to, please open an issue or a discussion and say which robot you have.  Knowing there are other users matters, and at some point someone else may need to take over as maintainer.
 
 ## License
 

@@ -27,31 +27,31 @@ don't scatter it through the code.
 
 ## Feedback and logging
 
-Should the CLI just send commands to the robot and then return, or should the commands be blocking and receiving feedback all until the operation is done?
+Should the CLI just send commands to the robot and then return, or should the commands block and receive feedback until the operation is done?
 
-Possibly the communication should go via a daemon to allow desktop notifications to be sent and logs to be received?  (to make it easier for potential other users to start using this, perhaps the CLI should work in a stand-alone-mode if the daemon is not running)
+Possibly the communication should go via a daemon to allow desktop notifications to be sent and logs to be received?  (To make it easier for potential other users to start using this, perhaps the CLI should work in a stand-alone mode if the daemon is not running.)
 
-Note: this section was added by the human, after the rest of the document was written.  I believe the original idea is "blocking and reporting".  The rest of the document may need a rethink if a daemon is to be added.  I see there is some text about the monitoring-loop.
+Note: this section was added by the human, after the rest of the document was written.  I believe the original idea is "blocking and reporting".  The rest of the document may need a rethink if a daemon is to be added.  I see there is some text about the monitoring loop.
 
 ## Goal, rethinking
 
-I will have to let my family use this, and they may not want to use the cli.  Is it possible to install python on the openwrt router?  I'm thinking to set up some simple web-ui.  It should not try to replicate all the functionality in the app.  I can give the other family members access to the app.  What is needed is a dead-simple web-interface for daily operations needed in our home + the specifics for our home:
-* The living room and bedroom 2 is special, the human needs to carry the bot to the room, and the system needed to verify that it can find the correct position at the map after the carry-operation.
-* Ordering matters - if more than one room is to be cleaned, then the outer hall and the bedroom 1 should always be cleaned first (to avoid the robot becoming stuck when returning to base)
-* When the robot can't find the base, it's needed with some logic:
+I will have to let my family use this, and they may not want to use the CLI.  Is it possible to install Python on the OpenWrt router?  I'm thinking of setting up some simple web UI.  It should not try to replicate all the functionality in the app.  I can give the other family members access to the app.  What is needed is a dead-simple web interface for daily operations needed in our home + the specifics for our home:
+* The living room and bedroom 2 are special: a human needs to carry the bot to the room, and the system needs to verify that it can find the correct position on the map after the carry operation.
+* Ordering matters - if more than one room is to be cleaned, then the outer hall and the bedroom 1 should always be cleaned first (to avoid the robot becoming stuck when returning to base).
+* When the robot can't find the base, some logic is needed:
   * The robot is not in the kitchen?  Then try to navigate it first to the hall and then to the kitchen, and then dock.  If the washing program got interrupted, then try to figure out what is done and what is not done and queue up the remaining tasks.
   * The robot is in the kitchen?  Human needs to check that the base is connected to electricity (the same socket is used for kitchen utensils - we need to get some more sockets installed) and that there are no chairs in the way.
-* Simple web interface.  Buttons for each room, plus a button for halls + kitchen + bedroom 1.  Also easy to choose between vac only, vac+mop, vac then mop and mop only.  Button for "abort / return to base".  Status box with logs / messages (with timestamps in Oslo-time).  Map - with a reload-button to regenerate the map.  The map in the app is neat, it shows where the bot has been and also where it has cleaned.
+* Simple web interface.  Buttons for each room, plus a button for halls + kitchen + bedroom 1.  Also easy to choose between vac only, vac+mop, vac then mop and mop only.  Button for "abort / return to base".  Status box with logs / messages (with timestamps in Oslo time).  Map - with a reload button to regenerate the map.  The map in the app is neat, it shows where the bot has been and also where it has cleaned.
 
-The project should be open-sourced - meaning that the "specifics for our home" mostly should land in a config file - but it's also possible to split it into an open-source general python package and make the web-system and local logic in a separate package.  Though, "we have some rooms where it's needed to carry the robot" and "robot got stuck while trying to return to base" are most likely not unique things with our home.
+The project should be open-sourced - meaning that the "specifics for our home" should mostly land in a config file - but it's also possible to split it into an open-source general python package and make the web-system and local logic in a separate package.  Though, "we have some rooms where it's needed to carry the robot" and "robot got stuck while trying to return to base" are most likely not unique to our home.
 
-The project can run either externally, on one of my servers (an Ubuntu box managed by puppet, or a NixOS box).  There is a complication since the OpenWRT router even has dynamic IPv6 - from time to time the ISP decides to rotate it.  We'd probably also need some kind of authentication.  Wireguard was already on the table.  Ideally I'd have it run on a local computer, but it does not seem like I will be able to set up something here and now.  Perhaps it can run from a family member's server.  In any case, the development and testing can be done from this laptop.
+The project can run externally, on one of my servers (an Ubuntu box managed by puppet, or a NixOS box).  There is a complication since the OpenWrt router even has dynamic IPv6 - from time to time the ISP decides to rotate it.  We'd probably also need some kind of authentication.  WireGuard was already on the table.  Ideally I'd have it run on a local computer, but it does not seem like I will be able to set up something here and now.  Perhaps it can run from a family member's server.  In any case, the development and testing can be done from this laptop.
 
 ## Decisions already made
 
 * Python, calling the python-kasa **library** directly.  Don't shell out to
   the `kasa` CLI; that's what `tapo-run-queue.sh` does, and it's why errors
-  get lost (see below).  (but if this should run from the OpenWRT router it probably needs to be implemented in C?).
+  get lost (see below).  (But if this should run from the OpenWrt router it probably needs to be implemented in C?).
 * python-kasa comes from `<python-kasa checkout>`, branch `tpap-rv50-tls-fix`
   (unmerged upstream).  The connection is the one the `kasa` command line
   in `field-notes.md` builds (`--port 4433 --https -e tpap -df
