@@ -4,8 +4,8 @@ Replaces the old spec `tapo-clean-spec.md`
 ("tapo-clean"), which is still the reference for payloads, status
 codes, pitfalls and the robot tests.  This document only covers what
 changes: a daemon, a web UI for the family, and the home-specific
-logic.  Milestones 1–4 are built (2026-09-26), see §9; none of it has
-cleaned a room yet.
+logic.  Milestones 1–5 are built (2026-09-28), see §9; real runs are logged
+in field-notes.md.
 
 ## 0. Arguments against, read first
 
