@@ -1,6 +1,9 @@
-# `tapo-clean` — room-cleaning CLI for the Tapo RV50 (spec, not built)
+# `tapo-clean` — room-cleaning CLI for the Tapo RV50 (spec)
 
 Written 2026-09-24 for whoever builds it.  Nothing here exists yet.
+(*Historical*: superseded by `design.md` and built as `opentapovac`; kept
+as the reference for the monitor loop, doorstep behaviour and robot
+tests.)
 Read first: `field-notes.md` (robot, map, room ids, how to
 connect), `protocol.md` section "Cleaning" (payloads, status and
 error codes), and `tapo-run-queue.sh` (the shell prototype this replaces).

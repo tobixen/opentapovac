@@ -227,7 +227,7 @@ defaults, nulls left out by Gson (*from app*; OpenTapoVac sends exactly this):
   2026-09-25): accepted, both rooms vacuumed, then both mopped.  List
   order and mixed `clean_type`s not checked yet.
 
-From the app, not yet sent:
+From the app, not yet sent unless noted:
 
 * `setSwitchClean`: `clean_mode` (0 whole house as python-kasa sends it,
   3 = rooms, 6 = task), `clean_on`, `clean_order`, `force_clean`,
@@ -237,12 +237,12 @@ From the app, not yet sent:
   level), `clean_number` (passes), `clean_type` (see above), `floor_texture` (clean angle),
   `carpet_strategy`, `density`, `is_custom`, `vertexs`.
 * `runCleanTask`: as `setSwitchClean` plus `dust_collection`,
-  `support_continue`, `is_custom`.
+  `support_continue`, `is_custom`.  Sent, see above.
 * Quick tasks: `getCleanTaskGroupList`, `getSpecificCleanTaskGroup`,
   `addCleanTaskGroup`, `startCleanTaskGroup {"group_id": n}`.
 * `setSwitchCharge {"switch_charge": true}` sends the robot home
   (`RobotDetailRepository.ea`, `RobotGotoChargeStatus`); `setRobotPause`
-  takes a `RobotPause`.
+  takes a `RobotPause`.  Both sent since, see below.
 * Also present: `setCleanAttr`, `get/setCleanOrder`, `setRobotPause`,
   `setSwitchCharge`, `setGotoDustCollection`, `setSwitchDustCollection`,
   `setWashMopSwitch`, `setDryMopSwitch`, `getBaseStatus`.

@@ -33,7 +33,8 @@ in field-notes.md.
    then the kitchen, then dock" needs `gotoPoint` (never sent) or a
    zone-clean stand-in (never tried).  Resuming an interrupted run needs
    to know what was done (`getPathData`, `getCleanRecords` — unclear).
-   v1 must work without them: stop, report, ask a human.
+   v1 must work without them: stop, report, ask a human.  (2026-09-28:
+   `gotoPoint` works, and the home route is built, §9.)
 4. **Reverse-engineered protocol from an unmerged python-kasa branch.**  A
    firmware update can break everything.  Vendor the transport, keep the robot's
    egress closed when not updating, and don't make the family depend on
@@ -57,7 +58,9 @@ warnings, event log, map with the recent tracks (max age, vacuum / mop /
 movement checkboxes), the home rules below, notifications.  One robot.
 
 Out: schedules, consumables, settings, map editing, multi-robot.  The
-family keeps the Tapo app for those.
+family keeps the Tapo app for those.  (2026-09-28: the app has shown the
+robot offline since its egress was closed, so the README now aims at
+making the app unnecessary.)
 
 ## 2. Components
 
@@ -81,7 +84,8 @@ opentapovac/
   notify.py     later: ntfy / desktop / email, pluggable
   mapimg.py     map + track rendering (was the tapo-render-map.py prototype)
   web/          small server + one page, no JS build step
-  cli.py        opentapovac clean|status|stop|home|rooms|log|serve
+  cli.py        opentapovac clean|answer|status|stop|home|pause|resume|
+                goto|rooms|log|map|render-map|serve
 ```
 
 **Engine is the only thing that talks to the robot.**  The daemon is
@@ -150,6 +154,9 @@ Dock not found (err 21):
    sequence + per-room track from `getPathData`, if that works) and offer
    "queue the rest" as a button.  Not automatic in v1.
 
+As built (§9), the home route starts at once, without a `Home()` retry,
+and an interrupted run is offered again as a whole.
+
 Relocation watchdog: as in the old spec (pause, ask, turn-on-the-spot,
 give up after N).  Refuse to start on an unlocked map or with
 `auto_change_map` on.
@@ -161,7 +168,7 @@ One page, phones first.
 * Preset buttons from config ("Halls + kitchen + bedroom 1"), then one
   button per room.
 * Mode selector: vac / vac+mop / vac then mop / mop.  Default in config.
-* Big red "Stop / go home".
+* Big red "Stop", and "Return to dock" next to it.
 * Status box: state in words, battery, water, current job and step.
   When the engine waits for a human: the question and its buttons,
   prominent.
@@ -173,7 +180,7 @@ One page, phones first.
   (htmx or hand-written), no build step.
 
 HTTP API (the CLI uses it too): `POST /jobs`, `GET /jobs/{id}`,
-`POST /jobs/{id}/answer`, `POST /stop`, `POST /pause`, `POST /resume`,
+`POST /jobs/{id}/answer`, `POST /stop`, `POST /home`, `POST /pause`, `POST /resume`,
 `GET /status`, `GET /events`
 (SSE), `GET /map.png?max_age=HOURS&show=vac,mop,move`, `POST /map/refresh`,
 `GET /map.json` (pixel ↔ mm), `POST /goto` (`{x, y}` in map mm or `{room}`;
@@ -213,7 +220,7 @@ robot: {host: 10.47.128.10, credentials: ~/.config/tapo/credentials.yaml}
 timezone: Europe/Oslo
 defaults: {mode: vac_then_mop, suction: 2, water: 2, passes: 1}
 rooms:            # keyed by robot room name or id; names come from the robot
-  "kjøkken": {aliases: [kitchen], dock: true}
+  "kjøkken": {aliases: [kitchen], dock: true}   # dock: not read yet
   6: {aliases: [outer hall, ytre gang]}
   "bedroom 2": {carry_in: true}
   "living room": {carry_out: true}
@@ -246,11 +253,13 @@ spec still gate the features that depend on them.
 4. Home rules: ordering, carry-rooms, position check.
 5. Recovery with waypoints (done: `home_route`, 2026-09-28).
 6. Notifications, deployment (NixOS module / puppet), router WireGuard
-   as client.  Host not chosen yet.
+   as client.  The NixOS module is done and the daemon runs on a NixOS
+   server (by 2026-09-28); notifications and WireGuard are not.
 
 State 2026-09-26: 1–4 are written and tested against a scripted robot and
 the recorded 2026-09-24 evening log; read-only calls (status, rooms, map)
-were checked against the real robot.  No run has been sent by it yet.
+were checked against the real robot.  No run has been sent by it yet
+(the first went out on 2026-09-26 09:03; field-notes.md).
 Where the build differs from the text above:
 
 * **Idle** (safe to send the next run) is 16, or 5/6 held for `settle`
@@ -365,7 +374,8 @@ Where the build differs from the text above:
 * **License:** AGPL-3.0-or-later.  Compatible with python-kasa's
   GPL-3.0-or-later.
 * **Host:** later.  Development and testing from the laptop, over the
-  home wifi or WireGuard.  §6 stays as background.
+  home wifi or WireGuard.  §6 stays as background.  (By 2026-09-28: a
+  NixOS server, §9.)
 * **Notifications:** later.  v1 shows messages on the web page (and in
   the CLI) only; `notify.py` waits.
 * **python-kasa:** a release from PyPI (0.10.2), with the TPAP transport

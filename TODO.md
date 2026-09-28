@@ -21,7 +21,7 @@
   room at 56 %): each trip home is another carry.  A "room done, go on"
   answer on the carry-out question (as carry-in's "skip").
 * **Not yet tried on the robot:** pause for a carry and resume after it,
-  the automatic home route, the job queue (in memory only: a restart
+  the job queue (in memory only: a restart
   loses it).  Watch the first real use.
 * **The laptop CLI reaches broxbox06 only through an ssh tunnel**:
   `DaemonClient` has no basic auth for the nginx front.
@@ -85,10 +85,9 @@
   (relocation watchdog, design.md §4, gets priority); a right position and
   a wrong route means the firmware planner.
 * **Skipped vacuum pass** (22:18): find out why.  Try `support_continue:
-  false`, or a stop before the run, and see if it vacuums.  But the mop
-  state is only read once a minute, so a vacuum pass shorter than that is
-  missed and reported as skipped: read `getMopState` on every poll while
-  cleaning first.
+  false`, or a stop before the run, and see if it vacuums.  (`getMopState`
+  is now read on every poll while cleaning, so a short vacuum pass is no
+  longer missed.)
 * **The kitchen doorstep** is lost in both directions: check for
   obstacles, or a ramp; a no-go line in front of the living room keeps the
   planner out of it when the living room is not in the run.  The

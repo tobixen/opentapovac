@@ -1,5 +1,7 @@
 # OpenTapoVac
 
+Disclaimer: parts of this file is AI-generated (Claude Opus 5.5), but all of it has been reviewed by a human.
+
 Local control of a TP-Link Tapo robot vacuum (developed against the
 RV50 Pro Omni): a daemon, a command-line tool and a small web page for
 day-to-day cleaning, with house-specific rules kept in a config file.
@@ -14,21 +16,18 @@ Omni robot vacuum.  I learned some few things about this device:
 * The firmware is locked down - not possible to fix it, hack it, nor replace it with Valetudo - we're stuck with the vendor-provided firmware.  Hence, the "Open"-part of this project is limited to the client-side software, this is not open firmware.
 * The robot has problems with doorsteps.
 * It is possible to reverse-engineer the cellphone app, and it is possible to control the device from the local network.  (see also [python-kasa PR #1592](https://github.com/python-kasa/python-kasa/pull/1592)).
+* Apparently, if only using the robot in the late nights and early mornings, it will never empty the dust container - and it seems that the water container in the robot won't be refilled.  Its clock was an hour off (UTC+1 while Oslo was on summer time), which pushed the quiet hours into the morning - whether it doesn't handle DST or just lost the update when its internet access was closed is not known.
 
 This project has some few goals:
 
 * Make workarounds for many of the issues found in the software
-* Make a CLI that I can use for controlling the robot
-* Make a web interface that my family can use
+* Make a CLI for me
+* Make a web interface for my family
+* Leave enough documentation in the project that the AI can do everything that can be done from the app, if not more.
 
 ## Status
 
-Early; sending real runs to one robot since 2026-09-26.  The command-line
-tool, the daemon, the web page, the home rules (room order, carrying the
-robot, a position check after carrying) and guiding the robot home when
-it can't find the dock exist (milestones 1–5 in
-[docs/design.md](docs/design.md)); notifications do not yet.  Background,
-protocol notes and a log of real runs are in [docs/](docs/).
+"It seems to work" with my 'bot and my home.  It has a daemon, a command-line tool and a web-page.  There are still some planned features that are missing.  In the start I had the idea that it was no point trying to replace the app - just make an interface suitable for daily routines and for working around all the problems encountered.  However, the app stopped working the moment I closed the egress for the vacuum, and I do find it a lot easier to do things from the laptop than from a cellphone app - so the long-term design goal now is to make the cellphone app completely obsolete.
 
 ## Installation
 
@@ -107,7 +106,7 @@ list of options.
 ```
 opentapovac clean kitchen "outer hall"      # one run, rooms in this order
 opentapovac clean --mop --sequential hall 6 # one run per room
-opentapovac status | stop | rooms | log
+opentapovac status | stop | home | rooms | log
 opentapovac answer done                     # "carry the robot into ..."
 opentapovac map map.png                     # map with the last 12 h of tracks
 opentapovac goto hall | goto 4100 3000      # send it to a room or a point (mm)
@@ -181,10 +180,7 @@ that check.
 
 ## Are you using this?  Please say so
 
-The author will not own this robot forever.  If you use OpenTapoVac, or
-would like to, please open an issue or a discussion and say which robot
-you have.  Knowing there are other users matters, and at some point
-someone else will need to take over as maintainer.
+The maintainers interest for this project will likely die the day the robot breaks down.  If you use OpenTapoVac, or would like to, please open an issue or a discussion and say which robot you have.  Knowing there are other users matters, and at some point someone else may need to take over as maintainer.
 
 ## License
 

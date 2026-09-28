@@ -205,9 +205,9 @@ Everything was read back and compared afterwards.
   robot time, i.e. 23:00–09:00: every run that morning was inside it.
   That fits the silence and the bin; the dry mop only if DND also cuts
   the water, unverified.  The base's tanks read fine and the mop washes
-  ran.  The phone app has shown the robot offline since about when the
-  egress was closed (network.md; it still reached it for the gotoPoints
-  that night), and still does with the egress open again.
+  ran.
+* The phone app has shown the robot offline since about when the
+  egress was closed, even with the phone connected to the same LAN.
 
 ## Next steps
 
