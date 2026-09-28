@@ -37,8 +37,9 @@ in field-notes.md.
    `gotoPoint` works, and the home route is built, §9.)
 4. **Reverse-engineered protocol from an unmerged python-kasa branch.**  A
    firmware update can break everything.  Vendor the transport, keep the robot's
-   egress closed when not updating, and don't make the family depend on
-   it for anything the app can't also do.
+   egress closed when not updating.  (2026-09-28: the family will not be
+   given the Tapo app, so if a firmware update breaks the protocol, they
+   have nothing to fall back on until it is fixed here.)
 5. **Not on the router.**  Python on OpenWrt is possible (`python3` is in
    the package feed), but python-kasa pulls in `aiohttp`, `cryptography`,
    `mashumaro` and friends; not all are packaged, pip-building them on the
@@ -57,10 +58,10 @@ In: start a run (rooms + mode), stop / send home, status, battery/base
 warnings, event log, map with the recent tracks (max age, vacuum / mop /
 movement checkboxes), the home rules below, notifications.  One robot.
 
-Out: schedules, consumables, settings, map editing, multi-robot.  The
-family keeps the Tapo app for those.  (2026-09-28: the app has shown the
-robot offline since its egress was closed, so the README now aims at
-making the app unnecessary.)
+Not yet: schedules, consumables, settings, map editing.  Out:
+multi-robot.  The family does not use the Tapo app, and the app has
+shown the robot offline since its egress was closed (2026-09-26), so the
+long-term aim is to make the app unnecessary (README).
 
 ## 2. Components
 
