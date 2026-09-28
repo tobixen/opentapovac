@@ -267,6 +267,31 @@ From the app, not yet sent:
   going home → fitting mop → washing mop → cleaning (4 → 17 → 15 → 1):
   the robot goes to the base to fit the mop first.
 
+### Settings and state — read 2026-09-28
+
+* `getDeviceTime` → `timestamp` (Unix, correct), `time_diff` (minutes
+  from UTC: 60 while Oslo was on UTC+2, see network.md), `region`
+  (`Europe/Oslo`).  `setDeviceTime` exists, not sent.
+* `getDoNotDisturb` → `do_not_disturb` (bool), `s_min`, `e_min`
+  (minutes after midnight, robot time; 1320 and 480 = 22:00–08:00).
+  `setDoNotDisturb` exists, not sent.  Presumably no voice and no
+  auto-emptying in these hours.
+* `getDustCollectionInfo` → `dust_freq` (2), `dust_collection_mode` (0).
+  Each clean record has `dust_collection` (bool): whether the bin was
+  emptied after that run.  `getAutoDustCollection`: -1002
+  (UNKNOWN_METHOD) on this robot.
+* `getConsumablesInfo` → `edge_brush_time`, `roll_brush_time`,
+  `filter_time`, `rag_time` (the mop pads; 0 while the others read
+  500–1300), `sensor_time`, `charge_contact_time`,
+  `main_brush_lid_time`, `detergent`, `clean_tray` (hours, presumably).
+* `getVolume` → `volume` (85).  `getValleyChargingTime` → `switch`,
+  `s_min`, `e_min` (off).
+* `getCleanAttr {"type": "global"}` → `clean_type 0, suction 2,
+  cistern 2, clean_number 1, density 1, is_custom false`.
+* `getDeviceInfo`: model RV50 Pro Omni, `fw_ver` 1.2.8 Build 260811,
+  `total_ver` 3.5.76, `mcu_ver` 1.1.2824.41 (it also carries the MAC and
+  serials, left out here).
+
 ### Track and clean records — read 2026-09-26
 
 * `getPathData {"start_pos": n}` returns only the entries from n on:

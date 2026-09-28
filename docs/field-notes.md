@@ -173,9 +173,45 @@ Everything was read back and compared afterwards.
   a sub-path marker, which the map drew as lines to map (0, 0), the
   original base spot in the living room.
 
+* 2026-09-28 01:09 (23:09 UTC): outer hall, mop (job 8f448bed, started
+  from the web page): mopped it, headed home at 38 % and stood lost in
+  the outer hall ("dock not found") without trying the doorstep.  The
+  robot was guided home with **`gotoPoint`, sent by Claude** (not from
+  the phone app), a point at a time.  Later that night **`gotoPoint` and `setSwitchCharge` from
+  OpenTapoVac both worked** (the web page's map tap and "Return to
+  dock"); the automatic home route (hall, then kitchen) followed.
+* 2026-09-28 06:43 (04:43 UTC): living room, then hall, vacuum and mop
+  (job b07764d5, broxbox06).  The living room run was lifted and put
+  down once (06:55, relocated in 40 s), wanted home at 07:03 and
+  was carried out, washed the mop at the base at 56 % and went back into
+  the living room (07:07) to go on; carried out again at 07:15 (seen
+  lifted and put down), done 07:21, record 18 min, 7 m², 3 washes.
+  Much of the living room is blocked by furniture, so "56 %" was most
+  of what it could reach.  Each trip home from a carry-out room is a
+  carry, and the doorstep is where it gives up: on the first carry it
+  hovered at the doorstep, on the second it was heading for the far
+  corner.  The hall run (07:21–07:35) **went over the doorstep into the
+  living room**: the living room / hall border (x = 3601 mm, the living
+  room's last column 95, rows 75–90) sits too close to the doorstep.
+  A move 10 cm into the hall (split at x = 3701 mm) is scripted in
+  `scripts/move-border-living-room-hall.py`, not run yet; the map before
+  it is kept locally.
+* 2026-09-28 07:37: kjøkken, vacuum then mop, water 3 (CLI, via the
+  daemon): 12 min, 2 washes, **the floor stayed dry**.  Level 2 used to
+  leave wet trails.  The whole morning the mop was dry, the robot said
+  nothing, and the bin has not been emptied since 2026-09-26 09:04
+  (every earlier day it was, with `dust_freq` 2).  Read that evening:
+  `time_diff` 60 (UTC+1 on a UTC+2 day) and do-not-disturb 22:00–08:00
+  robot time, i.e. 23:00–09:00: every run that morning was inside it.
+  That fits the silence and the bin; the dry mop only if DND also cuts
+  the water, unverified.  The base's tanks read fine and the mop washes
+  ran.  The phone app has shown the robot offline since about when the
+  egress was closed (network.md; it still reached it for the gotoPoints
+  that night), and still does with the egress open again.
+
 ## Next steps
 
 * The tool is designed in `design.md`; the robot tests to do first are
   in `tapo-clean-spec.md`.
-* First movement test, with someone watching: `gotoPoint` to a spot in the
-  kitchen, then back to the dock.  Check `real_vac_coor` while it runs.
+* A mop run after 09:00, to tell a do-not-disturb dry mop from a
+  hardware one; then fix the offset or the quiet hours (TODO.md).

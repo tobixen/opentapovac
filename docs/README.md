@@ -15,6 +15,7 @@ Dates are when things were found out.
 | [protocol.md](protocol.md) | The robot's local API as far as known: transport, map, cleaning, status and error codes, movement |
 | [robot-methods.txt](robot-methods.txt) | All method names in the Tapo app's robot enum |
 | [payloads/](payloads/) | Exact write payloads that were sent to a real robot |
+| [scripts/](scripts/) | One-off robot scripts for this house (a room-border move) |
 | [tapo-clean-spec.md](tapo-clean-spec.md) | The earlier CLI-only spec; still the reference for the monitor loop, doorstep behaviour and the robot tests to do |
 | [field-notes.md](field-notes.md) | The robot, the map and rooms, and a log of what was done to it |
 | [network.md](network.md) | Putting the robot on an isolated IoT network, WireGuard for remote access |

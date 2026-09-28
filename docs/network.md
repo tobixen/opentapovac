@@ -81,8 +81,23 @@ costs:
   dnsmasq's `logqueries` would log them, but for the whole house.
 * Local control should keep working: TPAP's SPAKE2+ handshake runs
   against the robot itself, with credentials stored on the robot.
-  **Unverified** — test by removing the forwarding for a day and
-  running the laptop commands over WireGuard.
+  **Verified** 2026-09-26–28: the daemon ran every job with the egress
+  closed.
+
+What happened once the egress was closed (2026-09-26 04:24):
+
+* **The phone app shows the robot offline** since about then, even from
+  a phone on the home network, and it stayed offline after the egress was opened again
+  (2026-09-28).  Whether the app needs the cloud to see the robot at
+  all, or the robot has to reconnect to it, is not known.
+* **Time: the clock stays right, the offset doesn't.**  Whether the
+  robot doesn't handle DST, or only lost the update with the egress
+  closed, is not known.  `getDeviceTime`
+  gave `time_diff: 60` (UTC+1) on 2026-09-28, while Oslo was on summer
+  time (UTC+2), so the robot's local time runs an hour behind.  Its
+  do-not-disturb hours (22:00–08:00 robot time, so 23:00–09:00) then
+  covered the early morning runs, which fits the voice going quiet and
+  the dust bin not being emptied (field-notes.md, 2026-09-28).
 
 ## Router: WireGuard instead of opening the robot to the internet
 

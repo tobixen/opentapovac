@@ -1,5 +1,32 @@
 # TODO
 
+## From 2026-09-28 (field-notes.md)
+
+* **Robot time and quiet hours:** `time_diff` 60 on a UTC+2 day, and
+  do-not-disturb 22:00–08:00 robot time (23:00–09:00): likely why the
+  bin isn't emptied and the voice is quiet on morning runs.  Fix the
+  offset (`setDeviceTime`) or the hours (`setDoNotDisturb`), in the app
+  or from here; show both in `opentapovac status`, and warn when a run
+  starts inside the quiet hours.
+* **Dry mop**, even at water 3: a mop run after 09:00 tells DND from
+  hardware (pump, filter, pads; `rag_time` reads 0).
+* **The app shows the robot offline** since the egress was closed, and
+  still with it open again.  Find out what brings it back (robot
+  restart? re-pair?), and whether the app ever talks to it locally.
+* **Move the living room / hall border** 10 cm into the hall:
+  `docs/scripts/move-border-living-room-hall.py MAP-BACKUP --send`, with
+  the robot idle; then refresh the rooms on broxbox06 and check that the
+  preset's ids (5 = hall) still hold.
+* **Carry-out rooms re-entered after a mid-run mop wash** (the living
+  room at 56 %): each trip home is another carry.  A "room done, go on"
+  answer on the carry-out question (as carry-in's "skip").
+* **Not yet tried on the robot:** pause for a carry and resume after it,
+  the automatic home route, the job queue (in memory only: a restart
+  loses it).  Watch the first real use.
+* **The laptop CLI reaches broxbox06 only through an ssh tunnel**:
+  `DaemonClient` has no basic auth for the nginx front.
+* `dock: true` in the room config is read by nothing.
+
 ## Monitor and engine, from the first real run (2026-09-26, field-notes.md)
 
 * **Lifted into standby is not "gave up".**  Carried after the run, the
@@ -72,5 +99,4 @@
   the battery failing during a probe, or `vacuum_first` passed on from a
   vacuum-then-mop run; `test_progress_logged_every_minute` pins exactly 3
   lines to the fake clock.
-* **`gotoPoint`** (from the app, not sent): test with someone watching,
-  kitchen spot then the hall; then waypoints (milestone 5).
+* ~~`gotoPoint`~~ works (2026-09-28), and so does the home route.
