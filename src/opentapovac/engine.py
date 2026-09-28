@@ -29,7 +29,7 @@ from .robot import Robot, RobotError
 from .rooms import Room, RoomError, RoomTable
 from .tracks import KINDS, CleanRecords, Track, describe_record
 
-__all__ = ["AnswerError", "Busy", "Engine", "Job", "JobRequest", "PlanError"]
+__all__ = ["AnswerError", "Engine", "Job", "JobRequest", "PlanError"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,10 +41,6 @@ GUIDES_PER_DAY = 3
 
 #: how far back the map shows tracks, seconds
 MAP_MAX_AGE = 12 * 3600.0
-
-
-class Busy(RuntimeError):
-    pass
 
 
 class JobFailed(Exception):
@@ -109,6 +105,8 @@ class Engine:
         self.clock, self.sleep = clock, sleep
         self.job: Job | None = None
         self.jobs: dict[str, Job] = {}
+        #: jobs waiting for the current one; the next starts only when it is done (not stopped or failed)
+        self.queue: list[Job] = []
         self._task: asyncio.Task | None = None
         #: the robot's map, fetched once and on refresh; the tracks are drawn on it per request
         self._map_data: dict[str, Any] | None = None
@@ -152,21 +150,45 @@ class Engine:
         return self.job is not None and self.job.active
 
     async def submit(self, req: JobRequest) -> Job:
-        """Plan and start a job in the background.  Raises PlanError, Busy."""
-        async with self._submit_lock:  # the room refresh awaits; two submits must not both pass
-            if self.busy:
-                raise Busy(f"job {self.job.id} is still {self.job.state}")
+        """Plan a job and start it in the background, or queue it behind the current one.  Raises PlanError."""
+        async with self._submit_lock:  # the room refresh awaits; two submits must not both start
             if not len(self.rooms):
                 await self.refresh_rooms()
             warnings: list[str] = []
             job = Job(req, self.plan(req, warnings), warnings=warnings)
-            self.job = self.jobs[job.id] = job
-            self._task = asyncio.create_task(self._run(job))
+            self.jobs[job.id] = job
+            if self.busy:
+                self.queue.append(job)
+                self._emit("info", f"job {job.id} queued: {job.describe()} ({len(self.queue)} waiting)", "queued", job)
+            else:
+                self._start(job)
             return job
 
+    def _start(self, job: Job) -> None:
+        self.job = job
+        self._task = asyncio.create_task(self._run(job))
+
+    def _next_job(self, ended: Job) -> None:
+        """After a job: the next in the queue if it ended done, else drop the queue (a human stepped in)."""
+        if not self.queue:
+            return
+        if ended.state != "done":
+            n = len(self.queue)
+            for j in self.queue:
+                j.state, j.message = "stopped", f"not started: job {ended.id} {ended.state}"
+                j.finished = datetime.now(UTC).isoformat(timespec="seconds")
+            self.queue.clear()
+            self._emit("warn", f"queue dropped ({n} waiting): job {ended.id} {ended.state}", "queue_dropped", ended)
+            return
+        self._start(self.queue.pop(0))
+
     async def wait(self) -> Job | None:
-        if self._task is not None:
-            await asyncio.shield(self._task)
+        """Until the current job, and the queue after it, has ended."""
+        while self._task is not None:
+            task = self._task
+            await asyncio.shield(task)
+            if self._task is task:
+                break
         return self.job
 
     async def run(self, req: JobRequest) -> Job:
@@ -211,6 +233,7 @@ class Engine:
             job.finished = datetime.now(UTC).isoformat(timespec="seconds")
             # the robot may still be busy (mop wash, a stuck run): the watcher follows it from here
             self._watching = True
+            self._next_job(job)
 
     async def _run_once(self, job: Job, run: Run, again: bool = False) -> tuple[list[str], bool]:
         """Send a run and follow it to the end.
@@ -774,6 +797,7 @@ class Engine:
             self.job.state = "stopped"
             self.job.question = self.job._answer = None
             self.job.finished = datetime.now(UTC).isoformat(timespec="seconds")
+            self._next_job(self.job)  # _run never ran to its end: drop the queue here
 
     async def home(self) -> None:
         """Send the robot to the dock, ending the current job first: its monitor would take the trip
@@ -838,6 +862,7 @@ class Engine:
         with contextlib.suppress(RobotError):
             out["relocating"] = (await self.robot.clean_status()).get("is_relocating")
         out["job"] = self.job.to_dict() if self.job else None
+        out["queue"] = [j.to_dict() for j in self.queue]
         return out
 
     async def refresh_rooms(self) -> RoomTable:

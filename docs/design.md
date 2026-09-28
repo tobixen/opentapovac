@@ -301,6 +301,11 @@ Where the build differs from the text above:
     from the app alike.
   * A run that lost the dock only after reaching 100 % is not
     "unfinished".
+* **A queue**: a job submitted while one runs waits its turn (`/status`
+  lists `queue`); the next starts only when the current one ended done.
+  A stopped or failed job (Stop, Home, goto, an error) drops the queue,
+  since a human stepped in or something is wrong.  Kept in memory only:
+  a daemon restart loses it.
 * **Stop** is the app's stop payload (protocol.md); the robot heads home
   by itself afterwards.  **Home** (`setSwitchCharge`, from the app, works
   since 2026-09-28) ends the current job first (its monitor would take the

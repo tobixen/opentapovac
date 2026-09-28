@@ -7,7 +7,7 @@ import time
 import pytest
 
 from opentapovac import mapimg
-from opentapovac.engine import AnswerError, Busy, Engine, JobRequest, PlanError
+from opentapovac.engine import AnswerError, Engine, JobRequest, PlanError
 from opentapovac.monitor import HomeGuide
 from opentapovac.payloads import STOP
 from opentapovac.robot import RobotError
@@ -83,15 +83,44 @@ async def test_unlocked_map_refused(config, events):
     assert robot.sent == []
 
 
-async def test_busy(config, events):
+async def test_queued_behind_a_running_job_and_stop_clears_the_queue(config, events):
     robot = FakeRobot([16, 1])  # never finishes
     engine, _ = make_engine(config, events, robot)
-    await engine.submit(JobRequest(rooms=["kitchen"]))
-    with pytest.raises(Busy):
-        await engine.submit(JobRequest(rooms=["kitchen"]))
+    first = await engine.submit(JobRequest(rooms=["kitchen"]))
+    await until(lambda: any(m == "runCleanTask" for m, _ in robot.sent))
+    second = await engine.submit(JobRequest(rooms=["outer hall"]))
+    assert second.state == "queued"
+    assert [j["id"] for j in (await engine.status())["queue"]] == [second.id]
     await engine.stop()
-    assert engine.job.state == "stopped"
+    assert first.state == "stopped"
+    assert second.state == "stopped"
+    assert "not started" in second.message
+    assert (await engine.status())["queue"] == []
     assert robot.sent[-1] == ("runCleanTask", STOP)
+    assert len([p for m, p in robot.sent if m == "runCleanTask" and p.get("clean_on")]) == 1
+
+
+async def test_queue_runs_in_turn(config, events):
+    robot = FakeRobot([*A_RUN, *A_RUN])
+    engine, _ = make_engine(config, events, robot)
+    first = await engine.submit(JobRequest(rooms=["kitchen"], mode="vac"))
+    second = await engine.submit(JobRequest(rooms=["outer hall"], mode="vac"))
+    await engine.wait()
+    assert (first.state, second.state) == ("done", "done")
+    sends = [p["area_list"][0]["id"] for m, p in robot.sent if m == "runCleanTask" and p.get("clean_on")]
+    assert sends == [1, 6]
+    assert engine.job is second
+
+
+async def test_queue_dropped_when_a_job_fails(config, events):
+    robot = FakeRobot([16], map_info={"current_map_id": 42, "map_list": [{"map_id": 42, "map_locked": 0}]})
+    engine, _ = make_engine(config, events, robot)
+    first = await engine.submit(JobRequest(rooms=["kitchen"]))  # fails: the map is not locked
+    second = await engine.submit(JobRequest(rooms=["kitchen"]))
+    await engine.wait()
+    assert first.state == "failed"
+    assert second.state == "stopped"
+    assert "queue_dropped" in [r["code"] for r in events.recent()]
 
 
 async def test_rooms_fetched_when_cache_empty(config, events):
@@ -471,7 +500,7 @@ async def test_concurrent_submits_start_one_job(config, events):
         engine.submit(JobRequest(rooms=["kitchen"])),
         return_exceptions=True,
     )
-    assert sorted(type(r).__name__ for r in results) == ["Busy", "Job"]
+    assert sorted(r.state for r in results) == ["queued", "running"]
     await engine.stop()
 
 

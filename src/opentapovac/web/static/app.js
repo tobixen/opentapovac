@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const selected = new Set();
-let mode = null, timezone = undefined, busy = false, statusSoon = null;
+let mode = null, timezone = undefined, statusSoon = null;
 
 async function api(method, path, body) {
   // the daemon takes JSON POSTs only (it keeps other web pages out that way)
@@ -26,7 +26,7 @@ function button(label, onclick, cls) {
 function refreshSelection() {
   for (const b of $("rooms").children) b.classList.toggle("on", selected.has(b.dataset.id));
   for (const b of $("modes").children) b.classList.toggle("on", b.dataset.mode === mode);
-  $("start").disabled = busy || selected.size === 0;
+  $("start").disabled = selected.size === 0;  // while busy, it queues
 }
 
 async function loadRooms() {
@@ -71,10 +71,10 @@ async function loadStatus() {
     if (s.relocating) bits.push("relocating");
     $("details").textContent = bits.join(" · ");
     const j = s.job;
-    busy = !!j && ["queued", "running", "waiting"].includes(j.state);
     showQuestion(j);
-    $("job").textContent = j ? `Job: ${j.description} — ${j.state}` + (j.steps > 1 ? ` (step ${j.step}/${j.steps})` : "")
-                               + (j.message ? `: ${j.message}` : "") : "";
+    $("job").textContent = (j ? `Job: ${j.description} — ${j.state}` + (j.steps > 1 ? ` (step ${j.step}/${j.steps})` : "")
+                                + (j.message ? `: ${j.message}` : "") : "")
+                           + ((s.queue || []).length ? ` · then: ${s.queue.map((q) => q.description).join(" | ")}` : "");
   } catch (e) {
     $("state").textContent = "no contact";
     $("details").textContent = e.message;

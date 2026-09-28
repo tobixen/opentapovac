@@ -44,6 +44,8 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 - When the robot needs carrying, it is paused until it has been carried,
   then resumed, so it doesn't give up the run at the doorstep
   (`pause_for_carry: false` turns it off); `opentapovac pause`/`resume`.
+- Jobs started while one runs are queued and run in turn; Stop (or a
+  job that fails or is stopped) drops the queue.
 - A "Return to dock" button on the web page, next to Stop.  Like going
   to a spot, it ends the current job.
 - Lost on the way home ("dock not found"), the robot is guided room by

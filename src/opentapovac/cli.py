@@ -28,7 +28,7 @@ import argcomplete
 from . import __version__, mapimg
 from .client import DaemonClient, DaemonError
 from .config import Config, load_config, load_credentials
-from .engine import MAP_MAX_AGE, AnswerError, Busy, Engine, JobRequest, PlanError
+from .engine import MAP_MAX_AGE, AnswerError, Engine, JobRequest, PlanError
 from .events import EventLog, format_record
 from .payloads import MODES
 from .robot import KasaRobot, RobotError
@@ -262,6 +262,9 @@ def print_status(st: dict[str, Any]) -> None:
         print("relocating")
     if st.get("job"):
         print_job(st["job"])
+    for q in st.get("queue", []):
+        print("then: ", end="")
+        print_job(q)
 
 
 def print_job(j: dict[str, Any]) -> None:
@@ -454,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "clean":
             print("interrupted; the robot carries on — `opentapovac stop` stops it", file=sys.stderr)
         return 130
-    except (CliError, PlanError, Busy, RobotError, DaemonError) as e:
+    except (CliError, PlanError, RobotError, DaemonError) as e:
         print(f"opentapovac: {e}", file=sys.stderr)
         return 2
 

@@ -67,7 +67,9 @@ async def test_bad_request_and_busy(make_client):
     assert (await client.post("/jobs", json={"rooms": ["bathroom"]})).status == 400
     assert (await client.post("/jobs", json={"rooms": ["stairs"]})).status == 400
     assert (await client.post("/jobs", json={"rooms": ["kitchen"]})).status == 201
-    assert (await client.post("/jobs", json={"rooms": ["kitchen"]})).status == 409
+    r = await client.post("/jobs", json={"rooms": ["kitchen"]})
+    assert r.status == 201
+    assert (await r.json())["state"] == "queued"
     assert (await client.post("/stop", json={})).status == 200
     await client.close()
 

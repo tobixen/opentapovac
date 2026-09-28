@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from .. import __version__
-from ..engine import MAP_MAX_AGE, AnswerError, Busy, Engine, JobRequest, PlanError
+from ..engine import MAP_MAX_AGE, AnswerError, Engine, JobRequest, PlanError
 from ..payloads import MODE_LABELS
 from ..robot import RobotError
 from ..tracks import KINDS
@@ -37,8 +37,6 @@ async def errors(request: web.Request, handler):
         return await handler(request)
     except (PlanError, AnswerError) as e:
         return _error(400, str(e))
-    except Busy as e:
-        return _error(409, str(e))
     except RobotError as e:
         return _error(502, f"robot: {e}")
 
