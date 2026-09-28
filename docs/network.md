@@ -68,10 +68,9 @@ fast.  Raise it, or send the log to another box with `log_ip`.
 Switching the rule off cuts the robot off from the cloud.  What that
 costs:
 
-* The phone app only works when the phone can reach the robot directly;
-  away from home it stops working.  Whether the app even talks locally
-  to a robot on another subnet is unknown — the app finds devices by
-  broadcast.
+* The phone app reaches the robot through the cloud, so it can lose the
+  robot altogether, at home as well as away (it did, see below).  Whether
+  the app can also talk to it locally is not known.
 * No firmware updates, no cloud map backup (`mapRecovery` pulls from the
   cloud), no voice-language changes, no "find my robot".
 * Time: the robot presumably uses NTP.  Without it, schedules may drift

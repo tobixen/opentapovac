@@ -322,7 +322,7 @@ From the app, not yet sent unless noted:
 * `gotoPoint {"switch": true, "point": [x, y]}` (`GotoPointParams`), in
   the mm frame of `getMapData`'s `goto_point` / `real_vac_coor`; status
   11 while going.  Works, also from standby with err 21 (dock not found),
-  from the app and from opentapovac, 2026-09-28.
+  sent by Claude and from opentapovac, 2026-09-28.
 * `setSwitchCharge {"switch_charge": true}`: the robot heads home;
   works, 2026-09-28.
 

@@ -27,6 +27,22 @@
   `DaemonClient` has no basic auth for the nginx front.
 * `dock: true` in the room config is read by nothing.
 
+## From the pre-release review (2026-09-28)
+
+* **A robot paused for a carry stays paused** if the job ends any other
+  way than an answer or being carried (Home, goto, a failed position
+  check, an error): `_follow`'s `finally` doesn't resume it, and whether
+  `setSwitchCharge` works on a paused robot is untested.  Resume in
+  `finally` unless stopped, with a test for Home during a carry question.
+* **Pause and queue gaps:** no test for `pause_failed`; a manual
+  pause/resume during a carry doesn't update the engine's `paused` flag;
+  the old job's tail track (mop wash) isn't recorded against it when a
+  queued job starts at once; `Engine.wait()` can raise `CancelledError`
+  from `asyncio.shield` if a queued job was cancelled before it started.
+  Missing tests: Home/goto dropping the queue, a queued job after "no" to
+  a redo question, and `test_position_found_after_a_relocation` pins the
+  poll count.
+
 ## Monitor and engine, from the first real run (2026-09-26, field-notes.md)
 
 * **Lifted into standby is not "gave up".**  Carried after the run, the
