@@ -301,6 +301,10 @@ From the app, not yet sent unless noted:
   (1, 0)`); a reply from n > 0 has none.  The track is cleared now and
   then: after a 25-minute run with a carry to the dock, 14 points were
   left, all on the last stretch; `path_id` 188 before and after.
+* After a mid-list `(1, 0)` the robot may record points counted from
+  (0, 0), as if it started there, until it finds itself on the map; then
+  it jumps 4-5 m to its real place (2026-09-26, twice in one run).
+  Steps between points are otherwise at most ~500 mm.
 * `getCleanRecords` → `total_time`, `total_area`, `total_number`,
   `lastest_day_record` `[timestamp, minutes, m², runs]` (today),
   `record_list[]`: `timestamp` (start, Unix), `clean_time` (min),

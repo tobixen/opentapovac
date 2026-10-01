@@ -114,9 +114,34 @@ def test_describe_record():
 
 def test_track_lines_break_at_the_sub_path_marker():
     """(1, 0) starts a new sub-path, anywhere in the list (2026-09-28: after a resume); no line through it."""
-    pts = [[4129, 3028], [1, 0], [4108, 2960], [8452, 452], [1, 0], [4456, 2512], [4464, 2468]]
+    pts = [[4129, 3028], [1, 0], [4108, 2960], [4084, 2912], [1, 0], [4456, 2512], [4464, 2468]]
     t = Track(None, [{"path_id": 7, "n": 8, "points": pts, "marks": [[0, 1000, "vac"]]}])
     assert t.lines() == [
-        [(4108, 2960, "vac"), (8452, 452, "vac")],
+        [(4108, 2960, "vac"), (4084, 2912, "vac")],
         [(4456, 2512, "vac"), (4464, 2468, "vac")],
     ]
+
+
+def xy(lines):
+    return [[p[:2] for p in line] for line in lines]
+
+
+def test_track_lines_drop_the_points_before_the_robot_finds_itself():
+    """After a sub-path marker the robot may count from (0, 0) until it knows where it is,
+    then jump to its place (2026-09-26: 4-5 m, drawn through walls and outside the house)."""
+    pts = [[640, 61], [664, 13], [1, 0], [-35, -36], [-71, -68], [4272, 2553], [4292, 2505]]
+    t = Track(None, [{"path_id": 7, "n": 8, "points": pts, "marks": [[0, 1000, "vac"]]}])
+    assert xy(t.lines()) == [[(640, 61), (664, 13)], [(4272, 2553), (4292, 2505)]]
+
+
+def test_track_lines_near_the_origin_kept_without_a_jump():
+    """A dock at (0, 0): no jump follows, so the points are real."""
+    pts = [[1, 0], [-35, -36], [-71, -68], [-111, -104]]
+    t = Track(None, [{"path_id": 7, "n": 5, "points": pts, "marks": [[0, 1000, "vac"]]}])
+    assert xy(t.lines()) == [[(-35, -36), (-71, -68), (-111, -104)]]
+
+
+def test_track_lines_break_at_a_jump():
+    pts = [[4108, 2960], [4084, 2912], [8452, 452], [8460, 400]]
+    t = Track(None, [{"path_id": 7, "n": 5, "points": pts, "marks": [[0, 1000, "vac"]]}])
+    assert xy(t.lines()) == [[(4108, 2960), (4084, 2912)], [(8452, 452), (8460, 400)]]

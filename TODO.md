@@ -27,6 +27,14 @@
   `DaemonClient` has no basic auth for the nginx front.
 * `dock: true` in the room config is read by nothing.
 
+## From the review of the track fix (2026-10-01)
+
+* `mapimg.drop_lost` drops a sub-path that starts within 100 mm of
+  (0, 0), up to its first jump over 1 m.  With a dock at (0, 0) (not
+  this house: (4167, 3651)) a run from the dock followed by a carry
+  could lose its points up to the carry.  Excluding starts near
+  `real_charge_coor` needs the map in `Track.lines`.
+
 ## From the pre-release review (2026-09-28)
 
 * **A robot paused for a carry stays paused** if the job ends any other

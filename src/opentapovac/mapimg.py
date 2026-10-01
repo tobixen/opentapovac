@@ -9,7 +9,9 @@ import base64
 import colorsys
 import io
 import json
+import math
 import struct
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +54,37 @@ def room_names(map_data: dict[str, Any]) -> dict[int, str]:
 TRACK_HEADER = {(377, -8), (1, 0)}
 #: starts a sub-path, also mid-list (2026-09-28: after a resume); no line is drawn through it
 TRACK_BREAK = (1, 0)
+#: more than this between two points (mm) is a jump, not a move; seen between moves: up to ~500
+MAX_STEP = 1000
+#: a sub-path starting this close to (0, 0) may be counted from there, before the robot finds itself
+LOST_RADIUS = 100
+
+
+def joined(a: Sequence[Any], b: Sequence[Any]) -> bool:
+    """Whether a line is drawn from point `a` to `b`: no sub-path marker, no jump."""
+    return TRACK_BREAK not in (tuple(a[:2]), tuple(b[:2])) and math.dist(a[:2], b[:2]) <= MAX_STEP
+
+
+def drop_lost(pts: Sequence[Any]) -> list[Any]:
+    """`pts`, with the points recorded before the robot found itself on the map made sub-path markers.
+
+    After a marker the robot may count from (0, 0) until it knows where it
+    is, then jump to its place (2026-09-26: twice in a run, 4-5 m, through
+    walls and outside the house).  A sub-path starting near (0, 0) is lost
+    up to its first jump; without a jump it is kept (a dock at (0, 0)).
+    """
+    out = list(pts)
+    start = 0
+    for i in range(len(pts) + 1):
+        if i < len(pts) and tuple(pts[i][:2]) != TRACK_BREAK:
+            continue
+        if start < i and math.hypot(*pts[start][:2]) <= LOST_RADIUS:
+            for j in range(start + 1, i):
+                if math.dist(pts[j - 1][:2], pts[j][:2]) > MAX_STEP:
+                    out[start:j] = [TRACK_BREAK] * (j - start)
+                    break
+        start = i + 1
+    return out
 
 
 def track_points(path_data: dict[str, Any]) -> list[tuple[int, int]]:
@@ -177,9 +210,9 @@ def render(
     segments: list[Any] = list(tracks or [])
     if path_data:
         segments.append(track_points(path_data))
-    for pts in segments:
+    for pts in map(drop_lost, segments):
         for a, b in zip(pts, pts[1:], strict=False):
-            if TRACK_BREAK in (tuple(a[:2]), tuple(b[:2])):
+            if not joined(a, b):
                 continue
             t = (b[0] % 4 << 2) + b[1] % 4
             col = TRACK_MOP if b[2:] == ("mop",) and t in (0, 5) else TRACK.get(t, TRACK_OTHER)

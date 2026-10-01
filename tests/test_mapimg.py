@@ -78,6 +78,14 @@ def test_render_breaks_at_the_sub_path_marker():
     assert render(make_map(), tracks=marked).tobytes() == two
 
 
+def test_render_breaks_at_a_jump_and_drops_the_lost_points():
+    two = render(make_map(60), tracks=[[(100, 100), (200, 100)], [(1800, 300), (1900, 300)]]).tobytes()
+    jump = [[(100, 100), (200, 100), (1800, 300), (1900, 300)]]
+    assert render(make_map(60), tracks=jump).tobytes() == two
+    lost = [[(100, 100), (200, 100), (1, 0), (20, 20), (60, 60), (1800, 300), (1900, 300)]]
+    assert render(make_map(60), tracks=lost).tobytes() == two
+
+
 def test_room_spot_is_on_the_room():
     from opentapovac.mapimg import room_spot, rooms_near
 
