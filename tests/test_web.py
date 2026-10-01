@@ -1,15 +1,17 @@
 import asyncio
+import base64
 import json
 import time
+from unittest import mock
 
 import pytest
-from aiohttp.test_utils import TestClient, TestServer
+from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 
 from opentapovac import __version__
 from opentapovac.client import DaemonClient
 from opentapovac.engine import Engine
 from opentapovac.rooms import RoomTable
-from opentapovac.web.server import make_app
+from opentapovac.web.server import _who, make_app
 from tests.conftest import FakeClock, FakeRobot, make_map
 
 
@@ -235,3 +237,42 @@ async def test_unknown_host_refused(make_client, config):
     config.allowed_hosts = ["robot.example.org"]
     assert (await client.get("/status", headers={"Host": "robot.example.org"})).status == 200
     await client.close()
+
+
+async def test_commands_logged_with_who_sent_them(make_client):
+    """2026-10-01: stop pressed ~57 times in 10 s, the robot sent home and back; the log must say from where."""
+    client, engine, _ = await make_client()
+    auth = {"Authorization": "Basic " + base64.b64encode(b"family:secret").decode()}
+    hdrs = {**auth, "X-Real-IP": "192.168.1.23", "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 7)"}
+    await client.post("/stop", json={}, headers=hdrs)
+    await client.post("/home", json={}, headers=hdrs)
+    r = await client.post("/jobs", json={"rooms": ["kitchen"], "mode": "mop"}, headers=hdrs)
+    job = await r.json()
+    await engine.wait()
+    await client.post("/pause", json={}, headers=hdrs)
+    await client.post("/resume", json={}, headers=hdrs)
+    await client.post("/goto", json={"room": "kitchen"}, headers=hdrs)
+    recs = engine.events.recent()
+    for code in ("stop", "home", "job", "pause", "resume", "goto"):
+        by = next(e["by"] for e in recs if e["code"] == code)
+        assert by == "family, 192.168.1.23, Mozilla/5.0 (Linux; Android 14; Pixel 7)"
+    assert "secret" not in json.dumps(recs)
+    assert (await (await client.get(f"/jobs/{job['id']}")).json())["by"].startswith("family, ")
+    await client.close()
+
+
+def _request(peer, headers):
+    transport = mock.Mock()
+    transport.get_extra_info.side_effect = lambda key, default=None: (peer, 1234) if key == "peername" else default
+    return make_mocked_request("POST", "/stop", headers=headers, transport=transport)
+
+
+def test_who_trusts_x_real_ip_only_from_the_local_proxy():
+    hdrs = {"X-Real-IP": "192.168.1.23", "User-Agent": "curl/8"}
+    assert _who(_request("127.0.0.1", hdrs)) == "192.168.1.23, curl/8"
+    assert _who(_request("10.0.0.5", hdrs)) == "10.0.0.5, curl/8"
+
+
+def test_who_with_a_broken_authorization_header():
+    assert _who(_request("10.0.0.5", {"Authorization": "Basic %%%"})) == "10.0.0.5"
+    assert _who(_request("10.0.0.5", {"Authorization": "Bearer abc"})) == "10.0.0.5"

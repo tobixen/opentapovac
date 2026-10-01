@@ -7,6 +7,11 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 
 ## Unreleased
 
+### Added
+
+* The log names who sent each command (login, address and browser), and
+  warns when the robot leaves the base without a command from here.
+
 ### Fixed
 
 * The map no longer draws the robot moving through walls and outside the

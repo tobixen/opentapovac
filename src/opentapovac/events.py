@@ -26,14 +26,19 @@ class EventLog:
                 except json.JSONDecodeError:
                     pass
 
-    def emit(self, level: str, msg: str, job: str | None = None, code: str | None = None) -> dict[str, Any]:
-        rec = {
+    def emit(
+        self, level: str, msg: str, job: str | None = None, code: str | None = None, by: str | None = None
+    ) -> dict[str, Any]:
+        """`by`: who sent the command the event is about (web: user, address, browser)."""
+        rec: dict[str, Any] = {
             "t": datetime.now(UTC).isoformat(timespec="seconds"),
             "level": level,
             "code": code,
             "msg": msg,
             "job": job,
         }
+        if by:
+            rec["by"] = by
         self._recent.append(rec)
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,4 +73,5 @@ class EventLog:
 def format_record(rec: dict[str, Any], timezone: str | None) -> str:
     t = datetime.fromisoformat(rec["t"])
     t = t.astimezone(ZoneInfo(timezone)) if timezone else t.astimezone()
-    return f"{t:%Y-%m-%d %H:%M:%S} {rec['level']:<6} {rec['msg']}"
+    by = f" [{rec['by']}]" if rec.get("by") else ""
+    return f"{t:%Y-%m-%d %H:%M:%S} {rec['level']:<6} {rec['msg']}{by}"

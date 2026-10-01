@@ -39,6 +39,8 @@ RESUME_CHECK = 60
 #: guiding the robot home more often than this in a day: something else is wrong, ask a human
 GUIDES_PER_DAY = 3
 
+#: a robot leaving the base within this many watch intervals of a command from here was sent by it
+COMMAND_GRACE = 3
 #: how far back the map shows tracks, seconds
 MAP_MAX_AGE = 12 * 3600.0
 
@@ -63,6 +65,8 @@ class Job:
     finished: str | None = None
     question: Ask | None = None
     warnings: list[str] = field(default_factory=list)
+    #: who submitted it (web: user, address, browser)
+    by: str | None = None
     _answer: asyncio.Future | None = field(default=None, repr=False)
 
     @property
@@ -86,6 +90,7 @@ class Job:
             "warnings": self.warnings,
             "created": self.created,
             "finished": self.finished,
+            "by": self.by,
         }
 
 
@@ -116,6 +121,9 @@ class Engine:
         self._track_failed = False
         #: the watcher follows the robot outside jobs
         self._watching = False
+        #: the status at the watcher's last look outside jobs; when a command was last sent from here
+        self._watch_status: int | None = None
+        self._commanded_at: float | None = None
         self._submit_lock = asyncio.Lock()
         self.params = MonitorParams(
             config.start_timeout, config.settle, config.gave_up_after, config.verify_after, config.stall_after
@@ -149,17 +157,22 @@ class Engine:
     def busy(self) -> bool:
         return self.job is not None and self.job.active
 
-    async def submit(self, req: JobRequest) -> Job:
-        """Plan a job and start it in the background, or queue it behind the current one.  Raises PlanError."""
+    async def submit(self, req: JobRequest, by: str | None = None) -> Job:
+        """Plan a job and start it in the background, or queue it behind the current one.  Raises PlanError.
+
+        `by`: who sent it, for the log.
+        """
         async with self._submit_lock:  # the room refresh awaits; two submits must not both start
             if not len(self.rooms):
                 await self.refresh_rooms()
             warnings: list[str] = []
-            job = Job(req, self.plan(req, warnings), warnings=warnings)
+            job = Job(req, self.plan(req, warnings), warnings=warnings, by=by)
             self.jobs[job.id] = job
             if self.busy:
                 self.queue.append(job)
-                self._emit("info", f"job {job.id} queued: {job.describe()} ({len(self.queue)} waiting)", "queued", job)
+                self._emit(
+                    "info", f"job {job.id} queued: {job.describe()} ({len(self.queue)} waiting)", "queued", job, by
+                )
             else:
                 self._start(job)
             return job
@@ -197,12 +210,15 @@ class Engine:
         await self.wait()
         return job
 
-    def _emit(self, level: str, msg: str, code: str | None = None, job: Job | None = None) -> None:
-        self.events.emit(level, msg, job=job.id if job else None, code=code)
+    def _emit(
+        self, level: str, msg: str, code: str | None = None, job: Job | None = None, by: str | None = None
+    ) -> None:
+        self.events.emit(level, msg, job=job.id if job else None, code=code, by=by)
 
     async def _run(self, job: Job) -> None:
         job.state = "running"
-        self._emit("info", f"job {job.id}: {job.describe()}", "job", job)
+        self._commanded_at = self.clock()
+        self._emit("info", f"job {job.id}: {job.describe()}", "job", job, job.by)
         for w in job.warnings:
             self._emit("warn", w, "plan_warning", job)
         try:
@@ -459,13 +475,33 @@ class Engine:
         return new
 
     async def watch_step(self) -> None:
-        """One look at the robot outside jobs: record the track of a run from the app, or of a job's tail."""
+        """One look at the robot outside jobs: record the track of a run from the app, or of a job's tail.
+
+        Leaving the base and coming back are logged, with a warning when no
+        command was sent from here in the last `COMMAND_GRACE` watch intervals
+        (2026-10-01: off the base for two hours, nothing in the log).
+        """
         if self.busy:
+            self._watch_status = None
             return
         vac = await self.robot.vac_status()
         if self.busy:  # a job started while we asked
             return
         status, errors = vac.get("status"), vac.get("err_status") or []
+        was = self._watch_status
+        if status is not None and was is not None and (was in AT_BASE) != (status in AT_BASE):
+            change = f"({status_text(was)} → {status_text(status)})"
+            if status in AT_BASE:
+                self._emit("info", f"back on the base {change}", "base_back")
+            elif self._commanded_at is not None and (
+                self.clock() - self._commanded_at <= COMMAND_GRACE * self.config.watch_interval
+            ):
+                self._emit("info", f"left the base {change}", "base_left")
+            else:
+                why = "not sent from here: the app, a schedule, the robot itself or a human"
+                self._emit("warn", f"left the base {change}, {why}", "base_left")
+        if status is not None:  # a reply without one: keep the last known
+            self._watch_status = status
         o = Observation.from_replies(self.clock(), vac)
         guiding = self._guide is not None and not self._guide.done
         active = guiding or (status not in (5, 6, 8, 16) and not (status == 0 and not errors))
@@ -513,7 +549,7 @@ class Engine:
         job.question = job._answer = None
         job.state = "running"
 
-    def answer(self, job_id: str, choice: str) -> None:
+    def answer(self, job_id: str, choice: str, by: str | None = None) -> None:
         job = self.jobs.get(job_id)
         if job is None:
             raise AnswerError("no such job")
@@ -522,7 +558,7 @@ class Engine:
         if choice not in job.question.choices:
             raise AnswerError(f"choose one of: {', '.join(job.question.choices)}")
         fut, job.question, job.state = job._answer, None, "running"
-        self._emit("info", f"answered: {choice}", "answered", job)
+        self._emit("info", f"answered: {choice}", "answered", job, by)
         fut.set_result(choice)
 
     async def _carry_pause(self, job: Job) -> bool:
@@ -780,11 +816,12 @@ class Engine:
 
     # --- direct commands ---
 
-    async def stop(self) -> None:
-        """Stop the current job (if any) and the robot's run."""
+    async def stop(self, by: str | None = None) -> None:
+        """Stop the current job (if any) and the robot's run; `by`: who sent it, for the log."""
         await self._end_job()
         await self.robot.send("runCleanTask", STOP)
-        self._emit("warn", "stop sent", "stop")
+        self._commanded_at = self.clock()
+        self._emit("warn", "stop sent", "stop", by=by)
 
     async def _end_job(self) -> None:
         """Cancel the current job, if any, and the guide home; the robot is left as it is."""
@@ -799,27 +836,32 @@ class Engine:
             self.job.finished = datetime.now(UTC).isoformat(timespec="seconds")
             self._next_job(self.job)  # _run never ran to its end: drop the queue here
 
-    async def home(self) -> None:
+    async def home(self, by: str | None = None) -> None:
         """Send the robot to the dock, ending the current job first: its monitor would take the trip
         home for the end of the run, and what it then finds missed could be sent again."""
         await self._end_job()
         try:
             await self.robot.send("setSwitchCharge", HOME)
         except RobotError as e:
-            self._emit("alert", f"job ended, but the robot did not take the home command: {e}", "home_failed")
+            self._emit("alert", f"job ended, but the robot did not take the home command: {e}", "home_failed", by=by)
             raise
-        self._emit("info", "sent home", "home")
+        self._commanded_at = self.clock()
+        self._emit("info", "sent home", "home", by=by)
 
-    async def pause(self) -> None:
+    async def pause(self, by: str | None = None) -> None:
         """Pause the robot's run (`setRobotPause`); the job, if any, goes on watching."""
         await self.robot.send("setRobotPause", PAUSE)
-        self._emit("info", "paused", "pause")
+        self._commanded_at = self.clock()
+        self._emit("info", "paused", "pause", by=by)
 
-    async def resume(self) -> None:
+    async def resume(self, by: str | None = None) -> None:
         await self.robot.send("setRobotPause", RESUME)
-        self._emit("info", "resumed", "resume")
+        self._commanded_at = self.clock()
+        self._emit("info", "resumed", "resume", by=by)
 
-    async def goto(self, point: tuple[int, int] | None = None, room: str | None = None) -> tuple[int, int]:
+    async def goto(
+        self, point: tuple[int, int] | None = None, room: str | None = None, by: str | None = None
+    ) -> tuple[int, int]:
         """Send the robot to a map point (mm), or to a spot in `room`; the point sent.
 
         `gotoPoint` is from the app; the robot followed it when sent from the
@@ -842,7 +884,8 @@ class Engine:
             raise PlanError(f"{where} is not on the floor (a wall, unknown, a no-go zone or off the map)")
         await self._end_job()  # a human steers now; as in home()
         await self.robot.send("gotoPoint", goto_payload(*point))
-        self._emit("info", f"sent to {where} (gotoPoint)", "goto")
+        self._commanded_at = self.clock()
+        self._emit("info", f"sent to {where} (gotoPoint)", "goto", by=by)
         return point
 
     async def status(self) -> dict[str, Any]:

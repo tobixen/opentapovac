@@ -418,6 +418,60 @@ async def test_watch_records_app_runs(config, events):
     assert list((config.state_dir / "tracks").glob("app-*.json"))
 
 
+async def test_watch_logs_status_changes_outside_jobs(config, events):
+    """2026-10-01: docked at 17:39, off the base in standby by 19:33 local, nothing in the log in between."""
+    robot = FakeRobot([16])
+    engine, _ = make_engine(config, events, robot)
+    for s in (16, 6, 0, 0, 6):  # drying -> charged is the robot's own business
+        robot.statuses = [vac(s)]
+        await engine.watch_step()
+    await engine.home()
+    for s in (4, 6):
+        robot.statuses = [vac(s)]
+        await engine.watch_step()
+    changes = [(r["level"], r["msg"]) for r in events.recent() if r["code"] in ("base_left", "base_back")]
+    assert changes == [
+        (
+            "warn",
+            "left the base (charged → standby), not sent from here: the app, a schedule, the robot itself or a human",
+        ),
+        ("info", "back on the base (standby → charged)"),
+        ("info", "left the base (charged → going home)"),
+        ("info", "back on the base (going home → charged)"),
+    ]
+
+
+async def test_watch_left_the_base_shortly_after_a_command(config, events):
+    """A look between the command and the robot leaving must not lose the command."""
+    robot = FakeRobot([6])
+    engine, clock = make_engine(config, events, robot)
+    await engine.watch_step()
+    await engine.home()
+    clock.t += 2
+    await engine.watch_step()  # still on the base
+    robot.statuses = [vac(4)]
+    clock.t += 60
+    await engine.watch_step()
+    robot.statuses = [vac(6)]
+    await engine.watch_step()
+    clock.t += 3600
+    robot.statuses = [vac(0)]
+    await engine.watch_step()
+    left = [r["level"] for r in events.recent() if r["code"] == "base_left"]
+    assert left == ["info", "warn"]
+
+
+async def test_watch_reply_without_status_is_not_a_change(config, events):
+    robot = FakeRobot([6])
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()
+    robot.statuses = [{"err_status": [0]}]
+    await engine.watch_step()
+    robot.statuses = [vac(6)]
+    await engine.watch_step()
+    assert not [r for r in events.recent() if r["code"] in ("base_left", "base_back")]
+
+
 async def test_watch_leaves_jobs_alone(config, events):
     robot = FakeRobot([16, 1])  # never finishes
     robot.path = (7, [(1, 0), (100, 100)])

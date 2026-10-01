@@ -161,6 +161,16 @@ config: the daemon answers only to localhost and the names listed there,
 and takes POSTs only as JSON from its own origin, so other web pages can't
 drive the robot through your browser.
 
+The log names who sent each command: the proxy's basic-auth user (so give
+each person a login of their own; it is trusted only from a basic-auth
+proxy), the address and the browser.  The address is the proxy's
+`X-Real-IP` when the request comes from localhost, so the proxy must set
+it (nginx: `proxy_set_header X-Real-IP $remote_addr;`, which NixOS's
+`recommendedProxySettings` does).  Everyone who can open the web page
+sees these.  Outside jobs, the robot leaving the base with no command
+sent from here in the last few minutes (the app, a schedule, the robot
+itself or a human hand) is logged as a warning.
+
 A carry room gets a run of its own, before the others.  For a
 `carry_in` room the run starts from the dock as usual (so the mops go on
 first), and the job asks someone to carry the robot in when it leaves

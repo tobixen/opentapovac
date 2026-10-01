@@ -7,7 +7,10 @@ for anything else.  No accounts here.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import html
+import ipaddress
 import json
 import math
 from importlib.resources import files
@@ -63,6 +66,25 @@ async def same_site(request: web.Request, handler):
         if origin and urlsplit(origin).netloc != request.host:
             return _error(403, f"cross-origin request from {origin}")
     return await handler(request)
+
+
+def _who(request: web.Request) -> str:
+    """Who sent a request, for the log: the basic-auth user (never the password),
+    the address (the proxy's `X-Real-IP` when it comes from localhost) and the browser."""
+    user = ""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Basic "):
+        try:
+            user = base64.b64decode(auth[6:]).decode(errors="replace").partition(":")[0]
+        except (binascii.Error, ValueError):
+            pass
+    addr = request.remote or ""
+    try:
+        if ipaddress.ip_address(addr).is_loopback:
+            addr = request.headers.get("X-Real-IP", addr)
+    except ValueError:
+        pass
+    return ", ".join(p for p in (user, addr, request.headers.get("User-Agent", "")[:120]) if p)
 
 
 routes = web.RouteTableDef()
@@ -126,7 +148,7 @@ async def post_job(request: web.Request) -> web.Response:
         return _error(400, "body must be JSON")
     if not isinstance(body, dict):
         return _error(400, "body must be a JSON object")
-    job = await request.app[ENGINE].submit(JobRequest.from_dict(body))
+    job = await request.app[ENGINE].submit(JobRequest.from_dict(body), by=_who(request))
     return web.json_response(job.to_dict(), status=201)
 
 
@@ -150,31 +172,31 @@ async def answer(request: web.Request) -> web.Response:
         return _error(400, "body must be JSON")
     if not isinstance(body, dict) or not isinstance(body.get("choice"), str):
         return _error(400, 'body must be {"choice": "..."}')
-    engine.answer(job_id, body["choice"])
+    engine.answer(job_id, body["choice"], by=_who(request))
     return web.json_response(engine.jobs[job_id].to_dict())
 
 
 @routes.post("/stop")
 async def stop(request: web.Request) -> web.Response:
-    await request.app[ENGINE].stop()
+    await request.app[ENGINE].stop(by=_who(request))
     return web.json_response({"ok": True})
 
 
 @routes.post("/home")
 async def home(request: web.Request) -> web.Response:
-    await request.app[ENGINE].home()
+    await request.app[ENGINE].home(by=_who(request))
     return web.json_response({"ok": True})
 
 
 @routes.post("/pause")
 async def pause(request: web.Request) -> web.Response:
-    await request.app[ENGINE].pause()
+    await request.app[ENGINE].pause(by=_who(request))
     return web.json_response({"ok": True})
 
 
 @routes.post("/resume")
 async def resume(request: web.Request) -> web.Response:
-    await request.app[ENGINE].resume()
+    await request.app[ENGINE].resume(by=_who(request))
     return web.json_response({"ok": True})
 
 
@@ -189,12 +211,12 @@ async def goto(request: web.Request) -> web.Response:
         return _error(400, "body must be a JSON object")
     engine = request.app[ENGINE]
     if "room" in body:
-        point = await engine.goto(room=str(body["room"]))
+        point = await engine.goto(room=str(body["room"]), by=_who(request))
     else:
         x, y = body.get("x"), body.get("y")
         if not all(isinstance(v, int) and not isinstance(v, bool) for v in (x, y)):
             return _error(400, 'goto takes {"x": mm, "y": mm} (integers) or {"room": name}')
-        point = await engine.goto((x, y))
+        point = await engine.goto((x, y), by=_who(request))
     return web.json_response({"ok": True, "point": list(point)})
 
 

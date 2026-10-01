@@ -103,6 +103,12 @@ function addLog(rec) {
   const time = document.createElement("time");
   time.textContent = fmt(rec.t);
   li.append(time, rec.msg);
+  if (rec.by) {
+    const by = document.createElement("small");
+    by.className = "by";
+    by.textContent = ` — ${rec.by}`;
+    li.append(by);
+  }
   $("log").prepend(li);
   while ($("log").children.length > 100) $("log").lastChild.remove();
 }
