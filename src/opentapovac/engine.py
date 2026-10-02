@@ -22,7 +22,7 @@ from . import mapimg
 from .codes import error_text, status_text
 from .config import Config
 from .events import EventLog
-from .monitor import AT_BASE, CLEANING, Ask, HomeGuide, IdleWatch, Monitor, MonitorParams, Observation
+from .monitor import AT_BASE, CLEANING, GOING_HOME, Ask, HomeGuide, IdleWatch, Monitor, MonitorParams, Observation
 from .payloads import HOME, PAUSE, RESUME, STOP, goto_payload, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
@@ -39,6 +39,8 @@ RESUME_CHECK = 60
 #: guiding the robot home more often than this in a day: something else is wrong, ask a human
 GUIDES_PER_DAY = 3
 
+#: going home, this far (mm) from any of the base's room counts as having left it
+LEFT_DOCK_ROOM = 300
 #: a robot leaving the base within this many watch intervals of a command from here was sent by it
 COMMAND_GRACE = 3
 #: how far back the map shows tracks, seconds
@@ -124,6 +126,10 @@ class Engine:
         #: the status at the watcher's last look outside jobs; when a command was last sent from here
         self._watch_status: int | None = None
         self._commanded_at: float | None = None
+        #: going home in the base's room ("armed"), seen out of it once ("out"),
+        #: or paused out of it until carried ("paused", "lifted")
+        self._homing: str | None = None
+        self._dock_room_warned = False
         self._submit_lock = asyncio.Lock()
         self.params = MonitorParams(
             config.start_timeout, config.settle, config.gave_up_after, config.verify_after, config.stall_after
@@ -315,6 +321,88 @@ class Engine:
         finally:
             self._unpose(job)
 
+    # --- out of the base's room on the way home ---
+
+    def _dock_room(self) -> Room | None:
+        """The room the base stands in, from the map; None if the map doesn't say, or two rooms are near."""
+        xy = (self._map or {}).get("real_charge_coor", [0, 0])[:2]
+        if not any(xy):
+            return None
+        try:
+            near = mapimg.rooms_near(self._map, xy, 100)
+        except Exception:  # noqa: BLE001 — as in _room_ids_now
+            return None
+        rid = next(iter(near)) if len(near) == 1 else None
+        return next((r for r in self.rooms if r.id == rid), None)
+
+    def _rooms_at(self, xy: tuple[int, int], radius: float) -> set[int] | None:
+        try:
+            return mapimg.rooms_near(self._map, xy, radius)
+        except Exception:  # noqa: BLE001 — a bad map costs the check, not the run
+            return None
+
+    async def _homing_step(self, o: Observation, job: Job | None) -> None:
+        """Going home from the base's room, and out of it: pause it and ask for a carry back.
+
+        The base is in that room, so the way home never leaves it
+        (2026-10-01: from the kitchen into the hall and on, then lost, the base
+        1 m away).  Out: no pixel of the room within `LEFT_DOCK_ROOM` mm, on
+        two looks in a row (one point can be a bad one).  Lifted and put down,
+        it is sent on home (resumed, or from standby sent home); carried onto
+        the base, it is left be.
+        """
+        if self._homing in ("paused", "lifted"):
+            if o.status in AT_BASE or o.status == CLEANING:  # carried onto the base, or sent on
+                self._homing = None
+            elif 4 in o.errors:
+                self._homing = "lifted"
+            elif self._homing == "lifted":
+                self._homing = None
+                cmd, payload = ("setSwitchCharge", HOME) if o.status == 0 else ("setRobotPause", RESUME)
+                try:
+                    await self.robot.send(cmd, payload)
+                    self._emit("info", "carried: sent on home", "carried", job)
+                except RobotError as e:
+                    msg = f"carried, but it did not take the command to go on home: {e}"
+                    self._emit("alert", msg, "resume_failed", job)
+            return
+        if o.status != GOING_HOME or (self._guide is not None and not self._guide.done):
+            self._homing = None
+            return
+        if self._map is None:
+            return
+        dock = self._dock_room()
+        if dock is None:
+            if not self._dock_room_warned:
+                self._dock_room_warned = True
+                msg = "the map doesn't place the base in one room: not watching for it leaving it on the way home"
+                self._emit("warn", msg, "dock_room_unknown", job)
+            return
+        pts = self.track.segments[-1]["points"] if self.track and self.track.segments else []
+        xy = mapimg.position(pts)
+        here = self._rooms_at(xy, 100) if xy else None
+        if here is None:
+            return
+        if dock.id in here:
+            self._homing = "armed"
+            return
+        near = self._rooms_at(xy, LEFT_DOCK_ROOM)
+        if self._homing not in ("armed", "out") or near is None or dock.id in near:
+            return
+        if self._homing == "armed":
+            self._homing = "out"
+            return
+        try:
+            await self.robot.send("setRobotPause", PAUSE)
+        except RobotError as e:
+            self._homing = None
+            msg = f"on its way home it left {dock.label}, and did not take the pause: {e}"
+            self._emit("alert", msg, "left_dock_room", job)
+            return
+        self._homing = "paused"
+        msg = f"on its way home it left {dock.label}, where the base is: paused — carry it to {dock.label}"
+        self._emit("alert", msg + "; it goes on home once put down", "left_dock_room", job)
+
     # --- lost on the way home ---
 
     def _room_ids_now(self) -> set[int]:
@@ -425,12 +513,10 @@ class Engine:
                 self._emit("alert", f"guiding it home failed: {e} — needs a human", "guide_gave_up", job)
 
     def watch_delay(self) -> float:
-        """Between the watcher's looks: shorter while guiding the robot home, not to miss a short leg."""
-        return (
-            self.config.poll_interval
-            if self._guide is not None and not self._guide.done
-            else self.config.watch_interval
-        )
+        """Between the watcher's looks: shorter while guiding the robot home, not to miss a short leg,
+        and while waiting for it to be carried, not to miss the lift."""
+        guiding = self._guide is not None and not self._guide.done
+        return self.config.poll_interval if guiding or self._homing else self.config.watch_interval
 
     # --- what the robot forgets ---
 
@@ -517,6 +603,7 @@ class Engine:
         if active:
             await self._poll_track(None)
             await self._guide_step(o, None)
+            await self._homing_step(o, None)
             if self._may_guide(o):
                 await self._start_guide(o, None)
             with contextlib.suppress(RobotError):
@@ -525,6 +612,8 @@ class Engine:
             self._watching = False
             await self._poll_track(None)
             await self._fetch_records(None)
+        if not active and self._homing in ("paused", "lifted"):  # put down in standby looks idle
+            await self._homing_step(o, None)
 
     async def watch(self) -> None:
         """The daemon's watcher; runs until cancelled."""
@@ -773,6 +862,8 @@ class Engine:
                     probed_at = o.t
                     self._emit_progress(o, job)
                 await self._guide_step(o, job)
+                if m.ask is None:  # in a carry, the human at hand sees to it
+                    await self._homing_step(o, job)
                 for ev in m.step(o):
                     self._emit(ev.level, ev.msg, ev.code, job)
                     relocated |= ev.code == "relocated"  # say where, once it moves on from there
@@ -824,8 +915,8 @@ class Engine:
         self._emit("warn", "stop sent", "stop", by=by)
 
     async def _end_job(self) -> None:
-        """Cancel the current job, if any, and the guide home; the robot is left as it is."""
-        self._guide = None
+        """Cancel the current job, if any, the guide home and the wait for a carry; the robot is left as it is."""
+        self._guide = self._homing = None
         if self._task is not None and not self._task.done():
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -850,11 +941,13 @@ class Engine:
 
     async def pause(self, by: str | None = None) -> None:
         """Pause the robot's run (`setRobotPause`); the job, if any, goes on watching."""
+        self._homing = None  # a human steers now
         await self.robot.send("setRobotPause", PAUSE)
         self._commanded_at = self.clock()
         self._emit("info", "paused", "pause", by=by)
 
     async def resume(self, by: str | None = None) -> None:
+        self._homing = None
         await self.robot.send("setRobotPause", RESUME)
         self._commanded_at = self.clock()
         self._emit("info", "resumed", "resume", by=by)

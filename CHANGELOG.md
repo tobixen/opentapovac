@@ -11,6 +11,8 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 
 * The log names who sent each command (login, address and browser), and
   warns when the robot leaves the base without a command from here.
+* Going home from the base's room and leaving it, the robot is paused and
+  someone is asked to carry it back; it goes on home once put down.
 
 ### Fixed
 

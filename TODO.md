@@ -21,8 +21,9 @@
   room at 56 %): each trip home is another carry.  A "room done, go on"
   answer on the carry-out question (as carry-in's "skip").
 * **Not yet tried on the robot:** pause for a carry and resume after it,
-  the job queue (in memory only: a restart
-  loses it).  Watch the first real use.
+  pausing while it goes home (left the base's room) and what status it
+  shows once put down, the job queue (in memory only: a restart loses
+  it).  Watch the first real use.
 * **The laptop CLI reaches broxbox06 only through an ssh tunnel**:
   `DaemonClient` has no basic auth for the nginx front.
 * `dock: true` in the room config is read by nothing.

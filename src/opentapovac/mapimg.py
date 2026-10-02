@@ -87,6 +87,20 @@ def drop_lost(pts: Sequence[Any]) -> list[Any]:
     return out
 
 
+def position(pts: Sequence[Any]) -> tuple[int, int] | None:
+    """Where the robot is by its track: the last point, or None while its sub-path may still be
+    counted from (0, 0) (`drop_lost`: near it, and no jump yet) or right at a sub-path marker."""
+    i = len(pts)
+    while i and tuple(pts[i - 1][:2]) != TRACK_BREAK:
+        i -= 1
+    sub = pts[i:]
+    if not sub:
+        return None
+    if math.hypot(*sub[0][:2]) <= LOST_RADIUS and all(joined(a, b) for a, b in zip(sub, sub[1:], strict=False)):
+        return None
+    return tuple(sub[-1][:2])
+
+
 def track_points(path_data: dict[str, Any]) -> list[tuple[int, int]]:
     """The points of a `getPathData` reply; one from `start_pos` > 0 has no header."""
     buf = lz4.block.decompress(base64.b64decode(path_data["pos_array"]), uncompressed_size=path_data["pos_len"])

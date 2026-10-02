@@ -138,6 +138,14 @@ room's own `home_route`), then sent home.  `goto` does the same by hand:
 it sends the robot to a floor spot in a room, or to a point, outside the
 no-go zones.  Like Stop and Home, it ends the current job.
 
+Going home from the room the base stands in (from the map), the robot
+has no reason to leave that room.  If it does, and is more than 30 cm
+from any part of the room on two looks in a row, it is paused and an
+alert asks for it to be carried back; once lifted and put down it is
+sent on home.  Carried onto the base, it is left be.  Resumed by hand
+instead (its button, the app, or Home here), it is not paused again on
+that trip.
+
 ## The web page
 
 `opentapovac serve` also serves a web page for day-to-day runs: buttons

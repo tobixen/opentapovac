@@ -1084,3 +1084,161 @@ async def test_pause_and_resume_commands(config, events):
     await engine.pause()
     await engine.resume()
     assert robot.sent == [PAUSE, RESUME]
+
+
+async def test_left_the_dock_room_on_the_way_home_is_paused_until_carried(config, events):
+    """2026-10-01: going home from the kitchen (the base's room) it went out into the hall and on.
+
+    Test map: kitchen x 0-500, room 6 x 500-1000, the base at (100, 100).
+    """
+    robot = FakeRobot([vac(4)])
+    pts = [(1, 0), (200, 200)]
+    robot.path = lambda: (7, pts)
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()  # going home, in the kitchen
+    pts.append((600, 200))  # past the doorway, but within the margin
+    await engine.watch_step()
+    assert ("setRobotPause", {"pause": True}) not in robot.sent
+    assert engine.watch_delay() == config.poll_interval  # going home in the base's room: watched closely
+    pts.append((900, 200))  # well out of the kitchen: once could be a bad point
+    await engine.watch_step()
+    assert ("setRobotPause", {"pause": True}) not in robot.sent
+    pts.append((950, 200))
+    await engine.watch_step()
+    assert robot.sent[-1] == ("setRobotPause", {"pause": True})
+    alert = next(r for r in events.recent() if r["code"] == "left_dock_room")
+    assert alert["level"] == "alert"
+    assert "carry it to kjøkken" in alert["msg"]
+    assert engine.watch_delay() == config.poll_interval  # not to miss the lift
+    for s in (vac(7), vac(7, 4), vac(7)):  # paused, lifted, put down
+        robot.statuses = [s]
+        await engine.watch_step()
+    assert robot.sent[-1] == ("setRobotPause", {"pause": False})
+    assert "carried" in [r["code"] for r in events.recent()]
+    assert engine.watch_delay() == config.watch_interval
+
+
+async def test_going_home_from_another_room_is_left_alone(config, events):
+    robot = FakeRobot([vac(4)])
+    pts = [(1, 0), (900, 200)]
+    robot.path = lambda: (7, pts)
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()
+    pts.append((950, 300))
+    await engine.watch_step()
+    assert not [m for m, _ in robot.sent if m == "setRobotPause"]
+
+
+async def test_left_the_dock_room_on_the_way_home_during_a_job(config, events):
+    statuses = [16, 1, 4, 4, 4, vac(7), vac(7, 4), vac(7), 4, 19, 16]
+    robot = FakeRobot(statuses)
+    track = [(200, 200), (250, 200), (900, 200), (900, 200), (900, 200), (150, 150), (100, 100)]
+    calls = []
+
+    def path():
+        calls.append(1)
+        return 7, [(1, 0), *track[: min(len(calls), len(track))]]
+
+    robot.path = path
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["kitchen"], mode="vac"))
+    pauses = [p for m, p in robot.sent if m == "setRobotPause"]
+    assert pauses == [{"pause": True}, {"pause": False}]
+    assert "left_dock_room" in [r["code"] for r in events.recent()]
+
+
+async def test_points_before_the_robot_finds_itself_are_no_position(config, events):
+    """After a sub-path marker the robot may count from (0, 0) until it relocates (mapimg.drop_lost)."""
+    robot = FakeRobot([vac(4)])
+    pts = [(1, 0), (200, 200)]
+    robot.path = lambda: (7, pts)
+    robot.map_data_reply = make_map(real_charge_coor=[900, 100, 0])
+    engine, _ = make_engine(config, events, robot)
+    pts[1:] = [(900, 200)]
+    await engine.watch_step()  # going home, in room 6
+    pts += [(1, 0), (20, 20), (60, 60)]  # counted from (0, 0): "in the kitchen"
+    await engine.watch_step()
+    assert not [m for m, _ in robot.sent if m == "setRobotPause"]
+
+
+async def _paused_out_of_the_kitchen(config, events):
+    robot = FakeRobot([vac(4)])
+    pts = [(1, 0), (200, 200)]
+    robot.path = lambda: (7, pts)
+    engine, _ = make_engine(config, events, robot)
+    for p in [None, (900, 200), (950, 200)]:
+        if p:
+            pts.append(p)
+        await engine.watch_step()
+    assert robot.sent[-1] == ("setRobotPause", {"pause": True})
+    return engine, robot
+
+
+async def test_put_down_in_standby_is_sent_home(config, events):
+    engine, robot = await _paused_out_of_the_kitchen(config, events)
+    for s in (vac(0, 4), vac(0)):  # lifted, put down: standby, which the watcher calls idle
+        robot.statuses = [s]
+        await engine.watch_step()
+    assert robot.sent[-1] == ("setSwitchCharge", {"switch_charge": True})
+    assert "carried" in [r["code"] for r in events.recent()]
+
+
+async def test_carried_onto_the_base_is_not_resumed(config, events):
+    engine, robot = await _paused_out_of_the_kitchen(config, events)
+    for s in (vac(7, 4), vac(6), vac(6, 4), vac(6)):
+        robot.statuses = [s]
+        await engine.watch_step()
+    assert robot.sent[-1] == ("setRobotPause", {"pause": True})
+    assert engine.watch_delay() == config.watch_interval
+
+
+async def test_home_while_waiting_for_the_carry_ends_the_wait(config, events):
+    engine, robot = await _paused_out_of_the_kitchen(config, events)
+    await engine.home()
+    assert engine.watch_delay() == config.watch_interval
+    for s in (vac(0, 4), vac(0)):
+        robot.statuses = [s]
+        await engine.watch_step()
+    assert robot.sent[-1] == ("setSwitchCharge", {"switch_charge": True})  # ours, not a second one
+    assert "carried" not in [r["code"] for r in events.recent()]
+
+
+async def test_one_bad_point_out_of_the_kitchen_is_no_pause(config, events):
+    robot = FakeRobot([vac(4)])
+    pts = [(1, 0), (200, 200)]
+    robot.path = lambda: (7, pts)
+    engine, _ = make_engine(config, events, robot)
+    for p in [None, (900, 200), (250, 200), (900, 200), (260, 200)]:
+        if p:
+            pts.append(p)
+        await engine.watch_step()
+    assert not [m for m, _ in robot.sent if m == "setRobotPause"]
+
+
+async def test_a_bad_map_costs_the_check_not_the_watcher(config, events, monkeypatch):
+    robot = FakeRobot([vac(4)])
+    robot.path = (7, [(1, 0), (200, 200)])
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()
+
+    calls, real = [], mapimg.rooms_near
+
+    def broken(*a, **kw):  # the base's room is found; the robot's position then fails
+        calls.append(1)
+        if len(calls) > 1:
+            raise ValueError("bad map")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(mapimg, "rooms_near", broken)
+    await engine.watch_step()  # no exception
+    assert len(calls) > 1
+
+
+async def test_base_room_unknown_is_said_once(config, events):
+    robot = FakeRobot([vac(4)])
+    robot.path = (7, [(1, 0), (200, 200)])
+    robot.map_data_reply = make_map(real_charge_coor=[0, 0, 0])
+    engine, _ = make_engine(config, events, robot)
+    await engine.watch_step()
+    await engine.watch_step()
+    assert [r["code"] for r in events.recent()].count("dock_room_unknown") == 1
