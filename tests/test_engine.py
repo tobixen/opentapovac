@@ -198,6 +198,74 @@ async def test_stop_without_job(config, events):
     await asyncio.sleep(0)
 
 
+def hold_stops(robot):
+    """Hold the robot's reply to a stop until the returned (sending, gate) `gate` is set."""
+    sending, gate = asyncio.Event(), asyncio.Event()
+    raw = robot._raw
+
+    async def slow_raw(method, params):
+        if params == STOP:
+            sending.set()
+            await gate.wait()
+        return await raw(method, params)
+
+    robot._raw = slow_raw
+    return sending, gate
+
+
+async def test_stops_in_flight_are_sent_once(config, events):
+    """2026-10-01: stop pressed ~57 times in 10 s; presses while one is on its way add nothing."""
+    robot = FakeRobot()
+    sending, gate = hold_stops(robot)
+    engine, _ = make_engine(config, events, robot)
+    presses = [asyncio.create_task(engine.stop(by="web")) for _ in range(5)]
+    await sending.wait()
+    gate.set()
+    await asyncio.gather(*presses)
+    assert robot.sent == [("runCleanTask", STOP)]
+    assert [r["code"] for r in events.recent()].count("stop") == 1
+    await engine.stop()  # the next press, after the reply, is sent again
+    assert robot.sent == [("runCleanTask", STOP)] * 2
+
+
+async def test_stop_after_one_just_done_is_sent(config, events):
+    """A done stop not yet cleared up (its callback is still to run) is not one on its way."""
+    robot = FakeRobot()
+    engine, _ = make_engine(config, events, robot)
+    engine._stopping = asyncio.get_running_loop().create_future()
+    engine._stopping.set_exception(RobotError("the old one"))
+    await engine.stop()
+    assert robot.sent == [("runCleanTask", STOP)]
+
+
+async def test_stops_in_flight_all_get_the_error(config, events):
+    robot = FakeRobot(fail={"runCleanTask": "timeout"})
+    engine, _ = make_engine(config, events, robot)
+    results = await asyncio.gather(engine.stop(), engine.stop(), return_exceptions=True)
+    assert [type(r) for r in results] == [RobotError, RobotError]
+    robot.fail = {}
+    await engine.stop()  # a failed stop does not swallow the next one
+    assert robot.sent == [("runCleanTask", STOP)]
+
+
+async def test_a_stop_in_flight_ends_a_job_started_meanwhile(config, events):
+    robot = FakeRobot([16, 1])  # never finishes
+    sending, gate = hold_stops(robot)
+    engine, _ = make_engine(config, events, robot)
+    first = asyncio.create_task(engine.stop())
+    await sending.wait()
+    job = await engine.submit(JobRequest(rooms=["kitchen"]))  # waits for the robot, held by the stop
+    for _ in range(10):
+        await asyncio.sleep(0)
+    second = asyncio.create_task(engine.stop())
+    await until(lambda: job.state == "stopped")
+    for _ in range(10):  # the second stop gets to wait for the first
+        await asyncio.sleep(0)
+    gate.set()
+    await asyncio.gather(first, second)
+    assert [p for _, p in robot.sent] == [STOP]  # the job never sent its run
+
+
 async def test_standby_counts_as_idle_with_warning(config, events):
     engine, _ = make_engine(config, events, FakeRobot([0, 0, 0, 0, 1, 4, 16]))
     job = await engine.run(JobRequest(rooms=["kitchen"]))

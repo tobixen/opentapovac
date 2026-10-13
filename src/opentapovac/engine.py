@@ -131,6 +131,8 @@ class Engine:
         self._homing: str | None = None
         self._dock_room_warned = False
         self._submit_lock = asyncio.Lock()
+        #: the stop on its way to the robot, which later stops wait for
+        self._stopping: asyncio.Future | None = None
         self.params = MonitorParams(
             config.start_timeout, config.settle, config.gave_up_after, config.verify_after, config.stall_after
         )
@@ -908,8 +910,23 @@ class Engine:
     # --- direct commands ---
 
     async def stop(self, by: str | None = None) -> None:
-        """Stop the current job (if any) and the robot's run; `by`: who sent it, for the log."""
+        """Stop the current job (if any) and the robot's run; `by`: who sent it, for the log.
+
+        A stop while one is on its way to the robot ends any job started meanwhile, then waits for
+        that one, sending and logging nothing more."""
         await self._end_job()
+        if self._stopping is None or self._stopping.done():
+            self._stopping = asyncio.ensure_future(self._send_stop(by))
+            self._stopping.add_done_callback(self._stop_sent)
+        await asyncio.shield(self._stopping)
+
+    def _stop_sent(self, f: asyncio.Future) -> None:
+        if f is self._stopping:
+            self._stopping = None
+        if not f.cancelled():
+            f.exception()  # every waiter may be gone: retrieved here, so asyncio does not warn
+
+    async def _send_stop(self, by: str | None) -> None:
         await self.robot.send("runCleanTask", STOP)
         self._commanded_at = self.clock()
         self._emit("warn", "stop sent", "stop", by=by)

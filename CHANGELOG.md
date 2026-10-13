@@ -16,6 +16,10 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
 
 ### Fixed
 
+* The web page's Stop and "Return to dock" buttons show that a press
+  landed ("Stopping…", "Sending home…") and take no more presses until
+  the daemon replies, and a stop pressed while one is on its way is not
+  sent or logged again.
 * The map no longer draws the robot moving through walls and outside the
   house: after a sub-path marker the robot may record points counted from
   (0, 0) until it finds itself on the map, then jump to its real place.

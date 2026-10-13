@@ -317,7 +317,10 @@ Where the build differs from the text above:
   since a human stepped in or something is wrong.  Kept in memory only:
   a daemon restart loses it.
 * **Stop** is the app's stop payload (protocol.md); the robot heads home
-  by itself afterwards.  **Home** (`setSwitchCharge`, from the app, works
+  by itself afterwards.  A stop while one is on its way is not sent again:
+  it ends any job started meanwhile and waits for that one.  On the page,
+  Stop and Home each disable themselves until the daemon replies to them
+  (35 s at most).  **Home** (`setSwitchCharge`, from the app, works
   since 2026-09-28) ends the current job first (its monitor would take the
   trip home for the end of the run and might send the rest again), and
   so does a goto: a human steers the robot then.

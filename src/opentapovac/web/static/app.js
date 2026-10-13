@@ -3,11 +3,11 @@ const $ = (id) => document.getElementById(id);
 const selected = new Set();
 let mode = null, timezone = undefined, statusSoon = null;
 
-async function api(method, path, body) {
+async function api(method, path, body, signal) {
   // the daemon takes JSON POSTs only (it keeps other web pages out that way)
   if (method === "POST") body = body || {};
   const r = await fetch(path, {method, headers: body ? {"Content-Type": "application/json"} : {},
-                               body: body ? JSON.stringify(body) : undefined});
+                               body: body ? JSON.stringify(body) : undefined, signal});
   const data = r.headers.get("content-type")?.includes("json") ? await r.json() : null;
   if (!r.ok) throw new Error(data?.error || r.statusText);
   return data;
@@ -166,14 +166,23 @@ for (const id of ["maxage", ...KINDS.map((k) => "show-" + k)]) {
 }
 
 $("start").onclick = () => start([...selected]);
-$("stop").onclick = async () => {
-  try { await api("POST", "/stop"); } catch (e) { say(e.message); }
-  loadStatus();
-};
-$("home").onclick = async () => {
-  try { await api("POST", "/home"); } catch (e) { say(e.message); }
-  loadStatus();
-};
+// a command button shows it was pressed, and takes no more presses, until the daemon replies
+function command(id, path, busy) {
+  const b = $(id), label = b.textContent;
+  b.onclick = async () => {
+    b.disabled = true;
+    b.textContent = busy;
+    say("");
+    // the robot's own timeout is 30 s; past that a stalled reply must not leave Stop dead
+    try { await api("POST", path, null, AbortSignal.timeout(35000)); } catch (e) { say(e.message); } finally {
+      b.textContent = label;
+      b.disabled = false;
+    }
+    loadStatus();
+  };
+}
+command("stop", "/stop", "Stopping…");
+command("home", "/home", "Sending home…");
 $("reload").onclick = async () => {
   $("reload").disabled = true;
   try { await api("POST", "/map/refresh"); await loadGeo(); showMap(); } catch (e) { say(e.message); }
