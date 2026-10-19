@@ -260,11 +260,35 @@ def print_status(st: dict[str, Any]) -> None:
         print("clean water tank in the base is empty")
     if st.get("relocating"):
         print("relocating")
+    print_clock(st.get("clock"))
     if st.get("job"):
         print_job(st["job"])
     for q in st.get("queue", []):
         print("then: ", end="")
         print_job(q)
+
+
+def print_clock(c: dict[str, Any] | None) -> None:
+    if not c:
+        return
+    if c["skew"]:
+        print(
+            f"robot clock: {abs(c['skew'])} min {'ahead' if c['skew'] > 0 else 'behind'} (time_diff {c['time_diff']})"
+        )
+    if c["quiet_hours"]:
+        line = f"quiet hours: {c['quiet_hours']}"
+        if c["quiet_hours_local"] != c["quiet_hours"]:
+            line += f" robot time ({c['quiet_hours_local']} here)"
+        if c.get("quiet_ends_in") is not None:
+            line += f" — now, for {duration(c['quiet_ends_in'])} more"
+        elif c.get("quiet_starts_in") is not None:
+            line += f" — in {duration(c['quiet_starts_in'])}"
+        print(line)
+
+
+def duration(minutes: int) -> str:
+    h, m = divmod(minutes, 60)
+    return f"{h} h {m} min" if h else f"{m} min"
 
 
 def print_job(j: dict[str, Any]) -> None:

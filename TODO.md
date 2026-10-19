@@ -6,8 +6,9 @@
   do-not-disturb 22:00–08:00 robot time (23:00–09:00): likely why the
   bin isn't emptied and the voice is quiet on morning runs.  Fix the
   offset (`setDeviceTime`) or the hours (`setDoNotDisturb`), in the app
-  or from here; show both in `opentapovac status`, and warn when a run
-  starts inside the quiet hours.
+  or from here.  (`opentapovac status` shows both, and a run starting
+  inside the quiet hours warns.)  Neither setter has been sent yet, and
+  the app may set the time again once it reaches the robot.
 * **Dry mop**, even at water 3: a mop run after 09:00 tells DND from
   hardware (pump, filter, pads; `rag_time` reads 0).
 * **The app shows the robot offline** since the egress was closed, and

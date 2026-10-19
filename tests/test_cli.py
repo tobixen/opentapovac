@@ -159,3 +159,39 @@ def test_goto_target_odd_numbers():
     from opentapovac.cli import goto_target
 
     assert goto_target(["--5", "3"]) == (None, "--5 3")
+
+
+def test_print_status_shows_the_robot_clock(capsys):
+    from opentapovac.cli import print_status
+
+    clock = {
+        "time_diff": 60,
+        "skew": -60,
+        "quiet_hours": "22:00–08:00",
+        "quiet_hours_local": "23:00–09:00",
+        "quiet_now": True,
+        "quiet_starts_in": None,
+        "quiet_ends_in": 143,
+    }
+    print_status({"status_text": "docked", "errors": [], "clock": clock})
+    out = capsys.readouterr().out
+    assert "robot clock: 60 min behind (time_diff 60)" in out
+    assert "quiet hours: 22:00–08:00 robot time (23:00–09:00 here) — now, for 2 h 23 min more" in out
+
+
+def test_print_status_quiet_hours_ahead(capsys):
+    from opentapovac.cli import print_status
+
+    clock = {
+        "time_diff": 60,
+        "skew": 0,
+        "quiet_hours": "22:00–08:00",
+        "quiet_hours_local": "22:00–08:00",
+        "quiet_now": False,
+        "quiet_starts_in": 45,
+        "quiet_ends_in": None,
+    }
+    print_status({"status_text": "docked", "errors": [], "clock": clock})
+    out = capsys.readouterr().out
+    assert "robot clock" not in out
+    assert "quiet hours: 22:00–08:00 — in 45 min\n" in out

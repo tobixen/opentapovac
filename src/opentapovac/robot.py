@@ -74,6 +74,14 @@ class Robot:
     async def clean_records(self) -> dict[str, Any]:
         return await self.query("getCleanRecords")
 
+    async def device_time(self) -> dict[str, Any]:
+        """`timestamp` (Unix), `time_diff` (the robot's offset from UTC, min), `region`."""
+        return await self.query("getDeviceTime")
+
+    async def do_not_disturb(self) -> dict[str, Any]:
+        """`do_not_disturb`, and the quiet hours `s_min`–`e_min` (minutes after midnight, robot time)."""
+        return await self.query("getDoNotDisturb")
+
 
 class KasaRobot(Robot):
     """The real robot, over TPAP/HTTPS: python-kasa's SmartProtocol on the vendored transport (_tpap.py)."""

@@ -137,6 +137,35 @@ async def test_status(config, events):
     assert st["errors"] == [{"code": 3, "text": "stuck"}]
     assert st["battery"] == 88
     assert st["job"] is None
+    assert st["clock"]["skew"] == 0
+    assert st["clock"]["quiet_hours"] is None
+
+
+async def test_status_without_the_clock(config, events):
+    robot = FakeRobot([16], fail={"getDoNotDisturb": "-1002"})
+    engine, _ = make_engine(config, events, robot)
+    assert (await engine.status())["clock"] is None
+
+
+async def test_warns_when_a_run_starts_inside_the_quiet_hours(config, events):
+    robot = FakeRobot(A_RUN)
+    # 2026-09-28 07:37 in Oslo: time_diff 60 on a UTC+2 day, quiet 22:00–08:00 robot time
+    robot.device_time_reply = {"timestamp": 1790573820, "time_diff": 60}
+    robot.dnd_reply = {"do_not_disturb": True, "s_min": 1320, "e_min": 480}
+    engine, _ = make_engine(config, events, robot)
+    job = await engine.run(JobRequest(rooms=["kitchen"]))
+    assert job.state == "done", job.message
+    [w] = [r["msg"] for r in events.recent() if r["code"] == "quiet_hours"]
+    assert "22:00–08:00 robot time (23:00–09:00 here)" in w
+    assert "60 min behind" in w
+
+
+async def test_no_quiet_hours_warning_outside_them(config, events):
+    robot = FakeRobot(A_RUN)
+    robot.dnd_reply = {"do_not_disturb": True, "s_min": 1320, "e_min": 480}  # 1790000000 is 16:13 in Oslo
+    engine, _ = make_engine(config, events, robot)
+    await engine.run(JobRequest(rooms=["kitchen"]))
+    assert "quiet_hours" not in [r["code"] for r in events.recent()]
 
 
 async def test_home(config, events):

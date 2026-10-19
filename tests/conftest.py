@@ -99,6 +99,9 @@ class FakeRobot(Robot):
         self.relocating = False
         self.battery_pct = 88
         self.clean_water = 0
+        #: getDeviceTime and getDoNotDisturb: the right offset, quiet hours off
+        self.device_time_reply = {"timestamp": 1790000000, "time_diff": 120, "region": "Europe/Oslo"}
+        self.dnd_reply = {"do_not_disturb": False, "s_min": 1320, "e_min": 480}
 
     async def _raw(self, method, params):
         if method in self.fail:
@@ -112,6 +115,10 @@ class FakeRobot(Robot):
             return {"battery_percentage": self.battery_pct}
         if method == "getBaseStatus":
             return {"clean_water": self.clean_water}
+        if method == "getDeviceTime":
+            return dict(self.device_time_reply)
+        if method == "getDoNotDisturb":
+            return dict(self.dnd_reply)
         if method == "getMapInfo":
             return self.map_info_reply
         if method == "getMapData":

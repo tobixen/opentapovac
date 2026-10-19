@@ -275,7 +275,8 @@ From the app, not yet sent unless noted:
 * `getDoNotDisturb` → `do_not_disturb` (bool), `s_min`, `e_min`
   (minutes after midnight, robot time; 1320 and 480 = 22:00–08:00).
   `setDoNotDisturb` exists, not sent.  Presumably no voice and no
-  auto-emptying in these hours.
+  auto-emptying in these hours.  `opentapovac status` shows them in the
+  house's time, and a run starting inside them warns.
 * `getDustCollectionInfo` → `dust_freq` (2), `dust_collection_mode` (0).
   Each clean record has `dust_collection` (bool): whether the bin was
   emptied after that run.  `getAutoDustCollection`: -1002

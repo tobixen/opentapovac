@@ -26,6 +26,7 @@ from .monitor import AT_BASE, CLEANING, GOING_HOME, Ask, HomeGuide, IdleWatch, M
 from .payloads import HOME, PAUSE, RESUME, STOP, goto_payload, run_payload
 from .plan import JobRequest, PlanError, Run, plan
 from .robot import Robot, RobotError
+from .robotclock import RobotClock
 from .rooms import Room, RoomError, RoomTable
 from .tracks import KINDS, CleanRecords, Track, describe_record
 
@@ -713,6 +714,12 @@ class Engine:
                 self._emit("warn", "clean water tank in the base is empty", "water_empty", job)
         except RobotError as e:
             self._emit("warn", f"could not read battery/base: {e}", "preflight", job)
+        clock = await self.robot_clock()
+        if clock is not None and clock.quiet():
+            msg = f"starting inside the robot's quiet hours, {clock.describe_quiet()}: likely silent, and the bin not emptied"
+            if skew := clock.describe_skew():
+                msg += f" ({skew})"
+            self._emit("warn", msg, "quiet_hours", job)
         await self._fetch_records(job, report=False)  # what came before this job
 
     async def _observe(self, probe: bool = False, mop_when_cleaning: bool = False) -> Observation:
@@ -1014,9 +1021,21 @@ class Engine:
             out["clean_water_empty"] = (await self.robot.base_status()).get("clean_water") == 1
         with contextlib.suppress(RobotError):
             out["relocating"] = (await self.robot.clean_status()).get("is_relocating")
+        clock = await self.robot_clock()
+        out["clock"] = clock.to_dict() if clock else None
         out["job"] = self.job.to_dict() if self.job else None
         out["queue"] = [j.to_dict() for j in self.queue]
         return out
+
+    async def robot_clock(self) -> RobotClock | None:
+        """The robot's clock and quiet hours; None when it can't tell."""
+        try:
+            return RobotClock.from_replies(
+                await self.robot.device_time(), await self.robot.do_not_disturb(), self.config.timezone
+            )
+        except (RobotError, KeyError, TypeError, ValueError):
+            _LOGGER.debug("no robot clock", exc_info=True)
+            return None
 
     async def refresh_rooms(self) -> RoomTable:
         self._set_rooms(await self.robot.map_data())

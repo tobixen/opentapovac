@@ -13,6 +13,10 @@ and this project should adhere to [Semantic Versioning](https://semver.org/spec/
   warns when the robot leaves the base without a command from here.
 * Going home from the base's room and leaving it, the robot is paused and
   someone is asked to carry it back; it goes on home once put down.
+* `opentapovac status` and the web page show the robot's clock offset
+  and its quiet hours (do-not-disturb) in the house's time, with the time
+  until they start or end, and a run starting inside the quiet hours
+  warns: the robot is then likely silent and does not empty the bin.
 
 ### Fixed
 
