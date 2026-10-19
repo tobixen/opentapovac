@@ -8,7 +8,12 @@
   offset (`setDeviceTime`) or the hours (`setDoNotDisturb`), in the app
   or from here.  (`opentapovac status` shows both, and a run starting
   inside the quiet hours warns.)  Neither setter has been sent yet, and
-  the app may set the time again once it reaches the robot.
+  the app may set the time again once it reaches the robot.  NTP does
+  not help: the clock is right, the offset is not.  It was still UTC+1
+  on 2026-10-22, weeks after the egress was opened again, and the
+  phone's zone is not UTC+1 either.  So either the robot ignores DST or
+  it holds a fixed UTC+1; either way the skew should be 0 from
+  2026-10-25 until 2027-03-28.
 * **Dry mop**, even at water 3: a mop run after 09:00 tells DND from
   hardware (pump, filter, pads; `rag_time` reads 0).
 * **The app shows the robot offline** since the egress was closed, and

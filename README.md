@@ -16,7 +16,7 @@ Omni robot vacuum.  I learned a few things about this device:
 * The firmware is locked down - not possible to fix it, hack it, nor replace it with Valetudo - we're stuck with the vendor-provided firmware.  Hence, the "Open" part of this project is limited to the client-side software; this is not open firmware.
 * The robot has problems with doorsteps.
 * It is possible to reverse-engineer the cellphone app, and it is possible to control the device from the local network (see also [python-kasa PR #1592](https://github.com/python-kasa/python-kasa/pull/1592)).
-* Apparently, if only using the robot in the late nights and early mornings, it will never empty the dust container - and it seems that the water container in the robot won't be refilled.  Its clock was an hour off (UTC+1 while Oslo was on summer time), which pushed the quiet hours into the morning - whether it doesn't handle DST or just lost the update when its internet access was closed is not known.
+* Apparently, if only using the robot in the late nights and early mornings, it will never empty the dust container - and it seems that the water container in the robot won't be refilled.  Its clock was an hour off (UTC+1 while Oslo was on summer time), which pushed the quiet hours into the morning - it stayed that way with its internet access open, so either it doesn't handle DST or it holds a fixed UTC+1.
 
 This project has a few goals:
 

@@ -89,9 +89,10 @@ What happened once the egress was closed (2026-09-26 04:24):
   a phone on the home network, and it stayed offline after the egress was opened again
   (2026-09-28).  Whether the app needs the cloud to see the robot at
   all, or the robot has to reconnect to it, is not known.
-* **Time: the clock stays right, the offset doesn't.**  Whether the
-  robot doesn't handle DST, or only lost the update with the egress
-  closed, is not known.  `getDeviceTime`
+* **Time: the clock stays right, the offset doesn't.**  It is not a
+  lost update: the offset was still UTC+1 on 2026-10-22, weeks after
+  the egress was opened again.  Whether the robot ignores DST or holds a
+  fixed UTC+1 is not known.  `getDeviceTime`
   gave `time_diff: 60` (UTC+1) on 2026-09-28, while Oslo was on summer
   time (UTC+2), so the robot's local time runs an hour behind.  Its
   do-not-disturb hours (22:00–08:00 robot time, so 23:00–09:00) then
