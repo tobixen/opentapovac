@@ -48,6 +48,7 @@
   #mapopts input[type=number] { width: 4.5em; font: inherit; }
   /* mapimg.TRACK, TRACK_MOP; movement is also green (heading home) and purple (other) */
   #mapopts .vac { color: #005aff; } #mapopts .mop { color: #00c8e6; } #mapopts .move { color: #ff8c00; }
+  #clock { color: var(--muted); font-size: .85rem; }
   .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 </style>
 </head>
@@ -94,6 +95,8 @@
     <img id="map" alt="map with the recent tracks">
     <div id="maphint">Tap the map to send the robot there.</div>
   </section>
+
+  <div id="clock"></div>
 </main>
 <script src="/static/app.js"></script>
 </body>

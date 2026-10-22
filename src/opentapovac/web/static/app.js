@@ -69,14 +69,17 @@ async function loadStatus() {
     if (s.battery != null) bits.push(`battery ${s.battery} %`);
     if (s.clean_water_empty) bits.push("clean water tank empty");
     if (s.relocating) bits.push("relocating");
-    const c = s.clock;
-    if (c?.skew) bits.push(`robot clock ${Math.abs(c.skew)} min ${c.skew > 0 ? "ahead" : "behind"}`);
+    // the clock goes at the bottom; only being inside the quiet hours is worth a line up here
+    const c = s.clock, clock = [];
+    if (c?.skew) clock.push(`robot clock ${Math.abs(c.skew)} min ${c.skew > 0 ? "ahead" : "behind"}`);
     if (c?.quiet_hours) {
       const dur = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ` : "") + `${m % 60} min`;
-      bits.push(`quiet hours ${c.quiet_hours_local}` + (c.quiet_now ? ` — now, for ${dur(c.quiet_ends_in)} more (likely no bin emptying)`
-                                                                     : ` — in ${dur(c.quiet_starts_in)}`));
+      clock.push(`quiet hours ${c.quiet_hours_local}` + (c.quiet_now ? ` — now, for ${dur(c.quiet_ends_in)} more`
+                                                                      : ` — in ${dur(c.quiet_starts_in)}`));
+      if (c.quiet_now) bits.push("quiet hours (likely no bin emptying)");
     }
     $("details").textContent = bits.join(" · ");
+    $("clock").textContent = clock.join(" · ");
     const j = s.job;
     showQuestion(j);
     $("job").textContent = (j ? `Job: ${j.description} — ${j.state}` + (j.steps > 1 ? ` (step ${j.step}/${j.steps})` : "")
@@ -85,6 +88,7 @@ async function loadStatus() {
   } catch (e) {
     $("state").textContent = "no contact";
     $("details").textContent = e.message;
+    $("clock").textContent = "";
   }
   refreshSelection();
 }
